@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -8,15 +8,13 @@ from config.dependencies import get_db
 from db.session import Base
 from main import app
 
-# Test database — uses SQLite in memory so no Postgres needed
 TEST_DATABASE_URL = "sqlite://"
 
 
 @pytest.fixture(scope="session")
 def test_engine():
     """
-    Creates an in-memory SQLite database for the test session.
-    StaticPool ensures the same connection is reused across threads.
+    Creates an in-memory SQLite database for the entire test session.
     """
     engine = create_engine(
         TEST_DATABASE_URL,
@@ -31,27 +29,44 @@ def test_engine():
 @pytest.fixture(scope="function")
 def db_session(test_engine):
     """
-    Yields a database session for each test.
-    Rolls back after each test so tests are isolated.
+    Wraps each test in a savepoint (nested transaction).
+    Any commit() inside the router becomes a savepoint release —
+    the outer transaction is rolled back after each test,
+    guaranteeing a clean slate for the next test.
     """
+    connection = test_engine.connect()
+    transaction = connection.begin()
+
     TestingSessionLocal = sessionmaker(
         autocommit=False,
         autoflush=False,
-        bind=test_engine,
+        bind=connection,
     )
     session = TestingSessionLocal()
+
+    # Intercept commit() calls — turn them into savepoint releases
+    # so router code that calls db.commit() doesn't permanently write data
+    nested = connection.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(session, transaction):
+        nonlocal nested
+        if not nested.is_active:
+            nested = connection.begin_nested()
+
     try:
         yield session
     finally:
-        session.rollback()
         session.close()
+        transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture(scope="function")
 def client(db_session):
     """
     FastAPI test client with the test DB injected.
-    Overrides the real get_db dependency with the test session.
+    Each test gets a fresh database state due to savepoint rollback.
     """
 
     def override_get_db():
@@ -68,7 +83,5 @@ def client(db_session):
 
 @pytest.fixture
 def api_key_headers():
-    """
-    Returns headers with a valid API key for authenticated requests.
-    """
+    """Valid API key headers for authenticated requests."""
     return {"X-API-Key": "dev-secret-change-this-before-production"}

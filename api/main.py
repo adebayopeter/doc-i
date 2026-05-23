@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
 from config.settings import settings
+from routers import processes
 
 logger = get_logger(__name__)
 
@@ -46,9 +47,37 @@ app.add_middleware(
 )
 
 
-# Global exception handler
+# ── Exception handlers ─────────────────────────────────────────────────────
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Ensures ALL error responses follow the standard envelope:
+    {"success": false, "message": "...", "data": null}
+
+    When routers raise HTTPException(detail=error_response(...)),
+    FastAPI would normally wrap it as {"detail": {...}}.
+    This handler unwraps it so the envelope is always at the top level.
+    """
+    detail = exc.detail
+
+    # If detail is already our envelope dict — return it directly
+    if isinstance(detail, dict) and "success" in detail:
+        return JSONResponse(status_code=exc.status_code, content=detail)
+
+    # Otherwise wrap the plain string detail in our envelope
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "message": str(detail) if detail else "An error occurred",
+            "data": None,
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all for unhandled exceptions."""
     logger.error(f"Unhandled error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
@@ -60,10 +89,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ── Routers
-# Add routers here as I build each one
-# from routers import processes, submissions, documents, analysis, config
-# app.include_router(processes.router, prefix="/v1/processes", tags=["Processes"])
+# Routers
+app.include_router(
+    processes.router,
+    prefix="/v1/processes",
+    tags=["Processes"],
+)
 
 
 # Health
