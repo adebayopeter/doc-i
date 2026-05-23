@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
@@ -32,8 +33,8 @@ app = FastAPI(
     license_info={
         "name": "Private — internal use only",
     },
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,
+    redoc_url=None,
     openapi_url="/openapi.json",
 )
 
@@ -45,6 +46,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Custom Swagger UI ──────────────────────────────────────────────────────
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui():
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Document Intelligence API — Swagger UI",
+        swagger_js_url=(
+            "https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"
+        ),
+        swagger_css_url=(
+            "https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css"
+        ),
+    )
+
+
+# ── Custom ReDoc ───────────────────────────────────────────────────────────
+@app.get("/redoc", include_in_schema=False)
+async def redoc_ui():
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title="Document Intelligence API — ReDoc",
+        redoc_js_url=(
+            "https://unpkg.com/redoc@2.1.3/bundles/redoc.standalone.js"
+        ),
+    )
 
 
 # ── Exception handlers ─────────────────────────────────────────────────────
@@ -89,7 +117,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Routers
+# ── Routers ────────────────────────────────────────────────────────────────
 app.include_router(
     processes.router,
     prefix="/v1/processes",
@@ -97,7 +125,7 @@ app.include_router(
 )
 
 
-# Health
+# ── Health ─────────────────────────────────────────────────────────────────
 @app.get(
     "/health",
     tags=["Health"],
