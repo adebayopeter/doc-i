@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -23,6 +23,10 @@ def _gen_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _now():
+    return datetime.now(timezone.utc)
+
+
 # 1. Process
 class Process(Base):
     """
@@ -38,9 +42,9 @@ class Process(Base):
     color_var = Column(String(50), default="info")
     icon = Column(String(100), default="ti-file")
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
     # relationships
@@ -97,9 +101,9 @@ class Submission(Base):
     status = Column(String(50), default="open", nullable=False)
     # status values: open | in_progress | complete | rejected
     meta_data = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
     # relationships
@@ -155,9 +159,9 @@ class SubmissionDocument(Base):
     summary = Column(Text, nullable=True)
     raw_ocr_text = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
     )
 
     # relationships
@@ -195,7 +199,7 @@ class ValidationRule(Base):
     severity = Column(String(20), default="error", nullable=False)
 
     is_enabled = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     def __repr__(self):
         return f"<ValidationRule id={self.id} name={self.name}>"
@@ -218,7 +222,7 @@ class AuditLog(Base):
     actor = Column(String(200), nullable=True)
     # who triggered this — user ID or "system"
     payload = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     # relationships
     submission = relationship("Submission", back_populates="audit_logs")
