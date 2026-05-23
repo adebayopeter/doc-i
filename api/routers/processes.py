@@ -17,14 +17,19 @@ from db.models import Process, ProcessDocument
 from schemas.base import error_response, success_response
 from schemas.process import (
     ProcessCreate,
+    ProcessDeactivateData,
+    ProcessDeactivateResponse,
     ProcessDetail,
+    ProcessDetailResponse,
     ProcessDocumentOut,
     ProcessListData,
+    ProcessListResponse,
     ProcessSummary,
 )
 
 logger = get_logger(__name__)
 
+# ── Module-level dependencies ──────────────────────────────────────────────
 db_dependency = Depends(get_db)
 auth_dependency = Depends(verify_api_key)
 
@@ -128,11 +133,10 @@ def _build_process_detail(process: Process) -> ProcessDetail:
 
 
 # ── POST /v1/processes ─────────────────────────────────────────────────────
-
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
+    response_model=ProcessDetailResponse,
     summary="Create a new process",
     description=(
         "Creates a reusable process definition with a required document checklist. "
@@ -141,6 +145,20 @@ def _build_process_detail(process: Process) -> ProcessDetail:
         "no training required."
     ),
     response_description="Process created successfully",
+    responses={
+        409: {
+            "description": "A process with this name already exists",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": "A process named 'RSA Mortgage' already exists",
+                        "data": {"existing_process_id": "proc_a1b2c3d4e5f6"},
+                    }
+                }
+            },
+        }
+    },
 )
 def create_process(
     payload: ProcessCreate,
@@ -204,16 +222,15 @@ def create_process(
     )
 
     return success_response(
-        data=_build_process_detail(process),
         message="Process created successfully",
+        data=_build_process_detail(process),
     )
 
 
 # ── GET /v1/processes ──────────────────────────────────────────────────────
-
-
 @router.get(
     "",
+    response_model=ProcessListResponse,
     summary="List all processes",
     description=(
         "Returns all active processes. "
@@ -236,19 +253,18 @@ def list_processes(db: Session = db_dependency):
     logger.info(f"Listed {len(processes)} processes")
 
     return success_response(
+        message="Processes retrieved successfully",
         data=ProcessListData(
             items=[_build_process_summary(p) for p in processes],
             total=len(processes),
         ),
-        message="Processes retrieved successfully",
     )
 
 
 # ── GET /v1/processes/{process_id} ────────────────────────────────────────
-
-
 @router.get(
     "/{process_id}",
+    response_model=ProcessDetailResponse,
     summary="Get a process",
     description=(
         "Returns full process details including the complete document checklist. "
@@ -269,16 +285,15 @@ def get_process(
     logger.info(f"Retrieved process: {process_id}")
 
     return success_response(
-        data=_build_process_detail(process),
         message="Process retrieved successfully",
+        data=_build_process_detail(process),
     )
 
 
 # ── DELETE /v1/processes/{process_id} ────────────────────────────────────
-
-
 @router.delete(
     "/{process_id}",
+    response_model=ProcessDeactivateResponse,
     status_code=status.HTTP_200_OK,
     summary="Deactivate a process",
     description=(
@@ -303,6 +318,6 @@ def delete_process(
     logger.info(f"Deactivated process: {process_id}")
 
     return success_response(
-        data={"process_id": process_id},
+        data=ProcessDeactivateData(process_id=process_id),
         message="Process deactivated successfully",
     )
