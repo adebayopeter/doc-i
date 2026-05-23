@@ -1,22 +1,21 @@
 """
 Tests for Pydantic schemas — validation and serialisation.
 """
+
 import pytest
 from pydantic import ValidationError
 
+from schemas.base import error_response, success_response
 from schemas.process import ProcessCreate, ProcessDocumentIn
 from schemas.submission import SubmissionCreate
-from schemas.base import success_response, error_response
-
 
 # ── ProcessCreate ──────────────────────────────────────────────────────────
+
 
 def test_process_create_valid():
     payload = ProcessCreate(
         name="RSA Mortgage",
-        documents=[
-            ProcessDocumentIn(name="NIN slip", category="Identity")
-        ],
+        documents=[ProcessDocumentIn(name="NIN slip", category="Identity")],
     )
     assert payload.name == "RSA Mortgage"
     assert len(payload.documents) == 1
@@ -24,9 +23,9 @@ def test_process_create_valid():
 
 def test_process_create_requires_name():
     with pytest.raises(ValidationError) as exc:
-        ProcessCreate(documents=[
-            ProcessDocumentIn(name="NIN slip", category="Identity")
-        ])
+        ProcessCreate(
+            documents=[ProcessDocumentIn(name="NIN slip", category="Identity")]
+        )
     assert "name" in str(exc.value)
 
 
@@ -39,7 +38,7 @@ def test_process_create_name_minimum_length():
     with pytest.raises(ValidationError):
         ProcessCreate(
             name="A",
-            documents=[ProcessDocumentIn(name="NIN slip", category="Identity")]
+            documents=[ProcessDocumentIn(name="NIN slip", category="Identity")],
         )
 
 
@@ -58,6 +57,7 @@ def test_process_document_required_can_be_false():
 
 
 # ── SubmissionCreate ───────────────────────────────────────────────────────
+
 
 def test_submission_create_valid():
     payload = SubmissionCreate(process_id="proc_abc123")
@@ -82,6 +82,7 @@ def test_submission_create_requires_process_id():
 
 
 # ── Response helpers ───────────────────────────────────────────────────────
+
 
 def test_success_response_structure():
     response = success_response(

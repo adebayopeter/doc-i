@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from config.settings import settings
+
 from config.logging import get_logger
+from config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -44,8 +45,8 @@ app = FastAPI(
     license_info={
         "name": "Private — internal use only",
     },
-    docs_url="/docs",       # Swagger UI
-    redoc_url="/redoc",     # ReDoc
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc",  # ReDoc
     openapi_url="/openapi.json",
 )
 
@@ -72,11 +73,11 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+
 # ── Routers
 # Add routers here as I build each one
 # from routers import processes, submissions, documents, analysis, config
 # app.include_router(processes.router, prefix="/v1/processes", tags=["Processes"])
-
 
 # Health
 @app.get(

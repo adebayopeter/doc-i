@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, List, Any
 from datetime import datetime
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ExtractedField(BaseModel):
@@ -8,9 +9,7 @@ class ExtractedField(BaseModel):
     confidence: float = Field(ge=0, le=100)
 
     class Config:
-        json_schema_extra = {
-            "example": {"value": "Emeka Obi", "confidence": 94.5}
-        }
+        json_schema_extra = {"example": {"value": "Emeka Obi", "confidence": 94.5}}
 
 
 class DocumentFlag(BaseModel):
@@ -59,9 +58,7 @@ class DocumentOut(BaseModel):
                         "confidence": 82,
                     },
                 },
-                "flags": [
-                    {"type": "ok", "message": "Document valid and not expired"}
-                ],
+                "flags": [{"type": "ok", "message": "Document valid and not expired"}],
                 "summary": "Valid NIN slip issued by NIMC. All fields clearly legible.",
                 "created_at": "2025-05-20T10:20:00",
                 "updated_at": "2025-05-20T10:20:45",
@@ -71,6 +68,7 @@ class DocumentOut(BaseModel):
 
 class DocumentUploadOut(BaseModel):
     """Immediate response after upload — before classification completes."""
+
     document_id: str
     submission_id: str
     filename: str

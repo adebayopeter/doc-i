@@ -2,8 +2,7 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-
+from sqlalchemy import pool
 from alembic import context
 
 # ── Make sure api/ is on the path ─────────────────────────────────────────
@@ -18,7 +17,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from db.models import (  # noqa: F401 — imported for side effects
+from db.models import (  # noqa: E402,F401
     AuditLog,
     Process,
     ProcessDocument,
@@ -30,7 +29,7 @@ from db.models import (  # noqa: F401 — imported for side effects
 # ── Import all models so Alembic can detect changes ───────────────────────
 # Every model must be imported here — if you add a new model later
 # you must add it to this import or Alembic won't detect it
-from db.session import Base
+from db.session import Base  # noqa: E402
 
 # ── Target metadata — tells Alembic what our schema should look like ───────
 target_metadata = Base.metadata

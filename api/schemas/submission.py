@@ -1,9 +1,10 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import List, Optional
 
+from pydantic import BaseModel, Field
 
 # Request schemas
+
 
 class SubmissionCreate(BaseModel):
     process_id: str = Field(
@@ -36,14 +37,13 @@ class SubmissionCreate(BaseModel):
 
 # Response schemas
 
+
 class SubmissionProgress(BaseModel):
     classified: int = Field(description="Documents successfully classified")
     required: int = Field(description="Total documents required by process")
 
     class Config:
-        json_schema_extra = {
-            "example": {"classified": 5, "required": 22}
-        }
+        json_schema_extra = {"example": {"classified": 5, "required": 22}}
 
 
 class SubmissionOut(BaseModel):

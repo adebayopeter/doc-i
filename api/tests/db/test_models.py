@@ -1,20 +1,19 @@
 """
 Tests for SQLAlchemy models.
 """
-import pytest
-from sqlalchemy.exc import IntegrityError
 
+import pytest
 from db.models import (
+    AuditLog,
     Process,
     ProcessDocument,
     Submission,
     SubmissionDocument,
     ValidationRule,
-    AuditLog,
 )
 
-
 # ── Process ────────────────────────────────────────────────────────────────
+
 
 def test_process_creates_successfully(db_session):
     process = Process(name="RSA Mortgage", description="Test process")
@@ -86,13 +85,12 @@ def test_process_document_cascades_on_delete(db_session):
     db_session.delete(process)
     db_session.commit()
 
-    remaining = db_session.query(ProcessDocument).filter_by(
-        process_id=process.id
-    ).all()
+    remaining = db_session.query(ProcessDocument).filter_by(process_id=process.id).all()
     assert len(remaining) == 0
 
 
 # ── Submission ─────────────────────────────────────────────────────────────
+
 
 def test_submission_creates_successfully(db_session):
     process = Process(name="Test Process")
@@ -124,6 +122,7 @@ def test_submission_default_status(db_session):
 
 
 # ── SubmissionDocument ─────────────────────────────────────────────────────
+
 
 def test_submission_document_creates_successfully(db_session):
     process = Process(name="Test Process")
@@ -170,6 +169,7 @@ def test_submission_document_default_status(db_session):
 
 # ── ValidationRule ─────────────────────────────────────────────────────────
 
+
 def test_validation_rule_creates_successfully(db_session):
     rule = ValidationRule(
         name="Full name required",
@@ -186,6 +186,7 @@ def test_validation_rule_creates_successfully(db_session):
 
 
 # ── AuditLog ───────────────────────────────────────────────────────────────
+
 
 def test_audit_log_creates_successfully(db_session):
     process = Process(name="Test Process")

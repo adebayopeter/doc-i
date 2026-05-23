@@ -1,11 +1,19 @@
 import uuid
 from datetime import datetime
+
 from sqlalchemy import (
-    Column, String, Integer, Float,
-    Boolean, DateTime, JSON,
-    ForeignKey, Text
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship
+
 from db.session import Base
 
 
@@ -21,18 +29,19 @@ class Process(Base):
     A reusable workflow definition — e.g. RSA Mortgage, Benefit Application.
     Defines which documents are required for that workflow.
     """
+
     __tablename__ = "processes"
 
-    id = Column(String, primary_key=True,
-                default=lambda: _gen_id("proc"))
+    id = Column(String, primary_key=True, default=lambda: _gen_id("proc"))
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     color_var = Column(String(50), default="info")
     icon = Column(String(100), default="ti-file")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow,
-                        onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # relationships
     documents = relationship(
@@ -53,6 +62,7 @@ class ProcessDocument(Base):
     One required document within a process checklist.
     e.g. "NIN slip", "Bank statement (6 months)"
     """
+
     __tablename__ = "process_documents"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -77,21 +87,20 @@ class Submission(Base):
     One application instance — e.g. one mortgage case for one applicant.
     All uploaded documents belong to a submission.
     """
+
     __tablename__ = "submissions"
 
-    id = Column(String, primary_key=True,
-                default=lambda: _gen_id("sub"))
-    process_id = Column(
-        String, ForeignKey("processes.id"), nullable=False
-    )
+    id = Column(String, primary_key=True, default=lambda: _gen_id("sub"))
+    process_id = Column(String, ForeignKey("processes.id"), nullable=False)
     reference = Column(String(200), nullable=True)  # your internal case ref
     applicant_id = Column(String(200), nullable=True)  # your system's user ID
     status = Column(String(50), default="open", nullable=False)
     # status values: open | in_progress | complete | rejected
     meta_data = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow,
-                        onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # relationships
     process = relationship("Process", back_populates="submissions")
@@ -113,10 +122,10 @@ class SubmissionDocument(Base):
     Stores the OCR result, AI classification, extracted fields,
     and the path to the raw file in MinIO.
     """
+
     __tablename__ = "submission_documents"
 
-    id = Column(String, primary_key=True,
-                default=lambda: _gen_id("doc"))
+    id = Column(String, primary_key=True, default=lambda: _gen_id("doc"))
     submission_id = Column(
         String, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
     )
@@ -147,8 +156,9 @@ class SubmissionDocument(Base):
     raw_ocr_text = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow,
-                        onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # relationships
     submission = relationship("Submission", back_populates="documents")
@@ -163,10 +173,10 @@ class ValidationRule(Base):
     Configurable validation rule — stored in the database so rules
     can be toggled on/off without redeploying the application.
     """
+
     __tablename__ = "validation_rules"
 
-    id = Column(String, primary_key=True,
-                default=lambda: _gen_id("rule"))
+    id = Column(String, primary_key=True, default=lambda: _gen_id("rule"))
     name = Column(String(200), nullable=False)
 
     # rule_type values: required | format | logical | cross_doc
@@ -198,12 +208,11 @@ class AuditLog(Base):
     e.g. document uploaded, classified, decision overridden, status changed.
     Never update or delete audit log entries.
     """
+
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    submission_id = Column(
-        String, ForeignKey("submissions.id"), nullable=True
-    )
+    submission_id = Column(String, ForeignKey("submissions.id"), nullable=True)
     event = Column(String(100), nullable=False)
     # e.g. document.uploaded | document.classified | decision.overridden
     actor = Column(String(200), nullable=True)

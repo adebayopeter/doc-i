@@ -1,12 +1,12 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class RuleUpdate(BaseModel):
     enabled: Optional[bool] = Field(
-        default=None,
-        description="Enable or disable this rule"
+        default=None, description="Enable or disable this rule"
     )
     severity: Optional[str] = Field(
         default=None,

@@ -1,11 +1,13 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 # Request schemas
 class ProcessDocumentIn(BaseModel):
     """One required document in the process checklist."""
+
     name: str = Field(
         ...,
         min_length=2,
@@ -37,6 +39,7 @@ class ProcessDocumentIn(BaseModel):
 
 class ProcessCreate(BaseModel):
     """Request body for creating a new process."""
+
     name: str = Field(
         ...,
         min_length=2,
@@ -97,6 +100,7 @@ class ProcessCreate(BaseModel):
 #  Response schemas
 class ProcessDocumentOut(BaseModel):
     """One document in the process checklist — returned in responses."""
+
     id: int
     name: str
     category: str
@@ -118,6 +122,7 @@ class ProcessDocumentOut(BaseModel):
 
 class ProcessSummary(BaseModel):
     """Compact process representation — used in list responses."""
+
     process_id: str
     name: str
     description: Optional[str]
@@ -143,6 +148,7 @@ class ProcessSummary(BaseModel):
 
 class ProcessDetail(BaseModel):
     """Full process with document checklist — used in single-item responses."""
+
     process_id: str
     name: str
     description: Optional[str]
@@ -185,6 +191,7 @@ class ProcessDetail(BaseModel):
 
 class ProcessListData(BaseModel):
     """Data payload for the list processes response."""
+
     items: List[ProcessSummary]
     total: int
 
@@ -205,4 +212,3 @@ class ProcessListData(BaseModel):
                 "total": 1,
             }
         }
-        

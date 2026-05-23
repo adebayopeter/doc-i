@@ -1,6 +1,6 @@
+from typing import Any, Generic, Optional, TypeVar
+
 from pydantic import BaseModel
-from typing import Any, Optional, Generic, TypeVar
-from datetime import datetime
 
 # Generic type for the data payload
 T = TypeVar("T")
@@ -24,17 +24,14 @@ class APIResponse(BaseModel, Generic[T]):
         "data": null
     }
     """
+
     success: bool
     message: str
     data: Optional[T] = None
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "success": True,
-                "message": "Request successful",
-                "data": {}
-            }
+            "example": {"success": True, "message": "Request successful", "data": {}}
         }
 
 
@@ -53,6 +50,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
         }
     }
     """
+
     success: bool
     message: str
     data: Optional[T] = None

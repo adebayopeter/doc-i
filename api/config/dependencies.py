@@ -1,8 +1,8 @@
-from fastapi import Security, HTTPException, status
+from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
-from sqlalchemy.orm import Session
-from config.settings import settings
+
 from config.logging import get_logger
+from config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -16,11 +16,12 @@ def get_db():
     even if an exception is raised.
 
     Usage in any router:
-        from core.dependencies import get_db
+        from config.dependencies import get_db
         def my_endpoint(db: Session = Depends(get_db)):
             ...
     """
     from db.session import SessionLocal
+
     db = SessionLocal()
     try:
         yield db

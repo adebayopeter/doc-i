@@ -1,6 +1,7 @@
-from pydantic_settings import BaseSettings
-from pydantic import field_validator
 from typing import List
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
 
 
 class BaseAppSettings(BaseSettings):

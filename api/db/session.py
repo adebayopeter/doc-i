@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from config.settings import settings
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from config.logging import get_logger
+from config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -12,8 +13,8 @@ logger = get_logger(__name__)
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,           # max 10 persistent connections
-    max_overflow=20,        # up to 20 extra connections under load
+    pool_size=10,  # max 10 persistent connections
+    max_overflow=20,  # up to 20 extra connections under load
     echo=settings.is_development,  # logs all SQL in dev, silent in prod
 )
 

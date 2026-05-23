@@ -4,10 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from main import app
-from db.session import Base
 from config.dependencies import get_db
-
+from db.session import Base
+from main import app
 
 # Test database — uses SQLite in memory so no Postgres needed
 TEST_DATABASE_URL = "sqlite://"
@@ -54,6 +53,7 @@ def client(db_session):
     FastAPI test client with the test DB injected.
     Overrides the real get_db dependency with the test session.
     """
+
     def override_get_db():
         try:
             yield db_session

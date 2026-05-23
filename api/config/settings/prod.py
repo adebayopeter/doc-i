@@ -1,4 +1,5 @@
 from pydantic import field_validator
+
 from config.settings.base import BaseAppSettings
 
 
@@ -10,8 +11,8 @@ class ProdSettings(BaseAppSettings):
     """
 
     ENVIRONMENT: str = "production"
-    LOG_LEVEL: str = "info"              # no debug noise in prod
-    MINIO_SECURE: bool = True            # TLS required in prod
+    LOG_LEVEL: str = "info"  # no debug noise in prod
+    MINIO_SECURE: bool = True  # TLS required in prod
 
     # Production-only validators
     @field_validator("SECRET_KEY")

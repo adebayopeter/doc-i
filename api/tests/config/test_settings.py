@@ -1,7 +1,6 @@
 """
 Tests for the configuration layer.
 """
-import pytest
 from config.settings import settings
 from config.settings.base import BaseAppSettings
 from config.settings.local import LocalSettings

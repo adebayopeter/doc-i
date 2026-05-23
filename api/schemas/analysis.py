@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, List, Any
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel
 
 
 class FieldValue(BaseModel):

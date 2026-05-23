@@ -1,6 +1,7 @@
 import os
-from config.settings.base import BaseAppSettings
+
 from config.logging import get_logger
+from config.settings.base import BaseAppSettings
 
 logger = get_logger(__name__)
 
@@ -10,10 +11,12 @@ _environment = os.getenv("ENVIRONMENT", "development").lower()
 def _get_settings() -> BaseAppSettings:
     if _environment == "production":
         from config.settings.prod import ProdSettings
+
         logger.info("Loaded: production settings")
         return ProdSettings()
     elif _environment == "development":
         from config.settings.local import LocalSettings
+
         logger.info("Loaded: local/development settings")
         return LocalSettings()
     else:
