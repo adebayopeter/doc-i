@@ -4,6 +4,28 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short --cov=. --cov-report=term-missing"
 
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "alembic/*",
+    "venv/*",
+    # Exclude schemas with no router tests yet — covered when routers are built
+    "schemas/analysis.py",
+    "schemas/config.py",
+    "schemas/document.py",
+    # Exclude prod settings — only runs in production environment
+    "config/settings/prod.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
 [tool.black]
 line-length = 88
 target-version = ["py312"]

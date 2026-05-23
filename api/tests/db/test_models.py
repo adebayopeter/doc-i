@@ -46,9 +46,17 @@ def test_process_defaults(db_session):
 
 
 def test_process_name_is_required(db_session):
-    """Process must raise TypeError when name is missing."""
-    with pytest.raises(TypeError, match="required keyword argument"):
-        Process()
+    """Database must reject a process with no name — NOT NULL constraint."""
+    from sqlalchemy.exc import IntegrityError
+
+    process = Process()
+    process.id = "proc_test_no_name"
+    process.is_active = True
+
+    db_session.add(process)
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
 
 
 def test_process_with_documents(db_session):
