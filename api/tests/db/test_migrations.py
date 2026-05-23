@@ -1,6 +1,7 @@
 """
 Tests that verify the database schema matches our SQLAlchemy models.
 """
+
 from sqlalchemy import inspect
 
 

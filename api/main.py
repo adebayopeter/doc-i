@@ -9,44 +9,30 @@ logger = get_logger(__name__)
 
 # App
 app = FastAPI(
-    title="Document Intelligence API",
-    description="""
-    ## Document Intelligence Platform
-    
-    AI-powered OCR, document classification, and field extraction API
-    built for AccessARM Pension's document processing workflows.
-
-    ### Features
-    - **Multi-process** — define any document workflow (mortgage, benefits application, onboarding)
-    - **AI classification** — Claude classifies any document type with no training
-    - **Field extraction** — structured data extracted from every document
-    - **Aggregation** — fields merged across all documents with conflict detection
-    - **Validation** — configurable rule engine (required, format, logic, cross-doc)
-    - **Decisioning** — confidence-based routing: auto / review / manual
-
-    ### Standard response format
-    Every endpoint returns:
-    ```json
-    {
-        "success": true,
-        "message": "Request successful",
-        "data": { ... }
-    }
-    ```
-
-    ### Authentication
-    Pass API key in every request header:
-    """,
+    title="Doc-I API",
+    description=(
+        "## Document Intelligence Platform\n\n"
+        "AI-powered OCR, document classification, and field extraction API "
+        "built for AccessARM Pension's document processing workflows.\n\n"
+        "### Standard response format\n"
+        "Every endpoint returns:\n"
+        "```json\n"
+        '{"success": true, "message": "Request successful", "data": {}}\n'
+        "```\n\n"
+        "### Authentication\n"
+        "Pass your API key in every request header:\n"
+        "```\nX-API-Key: your-api-key\n```"
+    ),
     version="1.0.0",
     contact={
-        "name": "Doc-I Platform",
-        "email": "ICT@access-armpensions.com",
+        "name": "Document Intelligence Platform",
+        "email": "support@yourfirm.ng",
     },
     license_info={
         "name": "Private — internal use only",
     },
-    docs_url="/docs",  # Swagger UI
-    redoc_url="/redoc",  # ReDoc
+    docs_url="/docs",
+    redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
 
@@ -78,6 +64,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Add routers here as I build each one
 # from routers import processes, submissions, documents, analysis, config
 # app.include_router(processes.router, prefix="/v1/processes", tags=["Processes"])
+
 
 # Health
 @app.get(

@@ -3,6 +3,7 @@ Tests for SQLAlchemy models.
 """
 
 import pytest
+
 from db.models import (
     AuditLog,
     Process,
@@ -45,10 +46,9 @@ def test_process_defaults(db_session):
 
 
 def test_process_name_is_required(db_session):
-    with pytest.raises(Exception):
-        process = Process()
-        db_session.add(process)
-        db_session.commit()
+    """Process must raise TypeError when name is missing."""
+    with pytest.raises(TypeError, match="required keyword argument"):
+        Process()
 
 
 def test_process_with_documents(db_session):
