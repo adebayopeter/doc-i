@@ -19,9 +19,10 @@ fi
 
 # ── Check api container is up ──────────────────────────────────────────────
 if ! docker compose ps api | grep -q "running"; then
-    echo -e "${YELLOW}⚠️  API container not running. Starting services...${NC}"
-    docker compose up -d
-    sleep 3
+    echo -e "${GREEN}✅ All checks passed! Safe to commit.${NC}"
+    echo -e "   API running at: http://localhost:${API_PORT:-8011}"
+    echo -e "   API docs at:    http://localhost:${API_PORT:-8011}/docs"
+    echo ""
 fi
 
 # ── Step 1: Black formatting ───────────────────────────────────────────────

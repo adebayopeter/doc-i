@@ -7,10 +7,11 @@ services:
     build:
       context: ./api
       args:
-        PYTHON_VERSION: "3.12"
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+        PYTHON_VERSION: ${PYTHON_VERSION}
+        REQUIREMENTS_FILE: ${REQUIREMENTS_FILE}
+    command: uvicorn main:app --host 0.0.0.0 --port ${API_INTERNAL_PORT} --reload
     ports:
-      - "${API_PORT}:8000"
+      - "${API_PORT}:${API_INTERNAL_PORT}"
     env_file: .env
     volumes:
       - ./api:/app
@@ -30,7 +31,8 @@ services:
     build:
       context: ./api
       args:
-        PYTHON_VERSION: "3.12"
+        PYTHON_VERSION: ${PYTHON_VERSION}
+        REQUIREMENTS_FILE: ${REQUIREMENTS_FILE}
     command: celery -A workers.tasks worker --loglevel=debug --concurrency=2
     env_file: .env
     volumes:
@@ -48,7 +50,7 @@ services:
     build:
       context: ./demo
       args:
-        PYTHON_VERSION: "3.12"
+        PYTHON_VERSION: ${PYTHON_VERSION}
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
     ports:
       - "${DEMO_PORT}:8501"
