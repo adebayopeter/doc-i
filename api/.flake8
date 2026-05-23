@@ -1,0 +1,14 @@
+[flake8]
+max-line-length = 88
+extend-ignore =
+    E203,   # whitespace before ':' (conflicts with Black)
+    E501,   # line too long (handled by Black)
+    W503,   # line break before binary operator
+exclude =
+    venv,
+    __pycache__,
+    alembic/versions,
+    .git
+per-file-ignores =
+    # Allow unused imports in __init__.py files
+    __init__.py:F401

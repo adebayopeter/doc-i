@@ -1,10 +1,31 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]    # tells pytest: imports resolve from api/
 testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short --cov=. --cov-report=term-missing"
 
-[tool.ruff]
-src = ["."]           # tells ruff: imports resolve from api/
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    venv
+  | __pycache__
+  | alembic/versions
+)/
+'''
 
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "."
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["config", "db", "routers", "services", "schemas", "workers"]
+skip = ["venv", "alembic/versions"]
+
+[tool.ruff]
+src = ["."]
+line-length = 88
