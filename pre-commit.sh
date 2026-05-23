@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No colour
 
 echo ""
-echo "🔍 Running pre-commit checks for Document Intelligence Platform..."
+echo "🔍 Running pre-commit checks for Doc-I Platform..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── Check Docker is running ────────────────────────────────────────────────
@@ -19,10 +19,9 @@ fi
 
 # ── Check api container is up ──────────────────────────────────────────────
 if ! docker compose ps api | grep -q "running"; then
-    echo -e "${GREEN}✅ All checks passed! Safe to commit.${NC}"
-    echo -e "   API running at: http://localhost:${API_PORT:-8011}"
-    echo -e "   API docs at:    http://localhost:${API_PORT:-8011}/docs"
-    echo ""
+    echo -e "${YELLOW}⚠️  API container not running. Starting services...${NC}"
+    docker compose up -d
+    sleep 3
 fi
 
 # ── Step 1: Black formatting ───────────────────────────────────────────────
@@ -81,8 +80,10 @@ else
     exit 1
 fi
 
-# ── All passed ────────────────────────────────────────────────────────────
+# ── All passed — print this LAST ──────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "${GREEN}✅ All checks passed! Safe to commit.${NC}"
+echo -e "   API running at: http://localhost:${API_PORT:-8012}"
+echo -e "   API docs at:    http://localhost:${API_PORT:-8012}/docs"
 echo ""
