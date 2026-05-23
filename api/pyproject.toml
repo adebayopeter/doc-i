@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]    # tells pytest: imports resolve from api/
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["."]           # tells ruff: imports resolve from api/
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "."
