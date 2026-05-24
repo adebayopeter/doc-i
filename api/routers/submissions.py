@@ -15,7 +15,7 @@ Endpoints:
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
@@ -110,7 +110,15 @@ router = APIRouter(
 
 def _get_submission_or_404(submission_id: str, db: Session) -> Submission:
     """Fetch a submission by ID. Raises 404 if not found."""
-    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    submission = (
+        db.query(Submission)
+        .options(
+            joinedload(Submission.process).joinedload(Process.documents),
+            joinedload(Submission.documents),
+        )
+        .filter(Submission.id == submission_id)
+        .first()
+    )
     if not submission:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -238,6 +246,17 @@ def create_submission(
     db.commit()
     db.refresh(submission)
 
+    # Reload with relationships eagerly loaded
+    submission = (
+        db.query(Submission)
+        .options(
+            joinedload(Submission.process).joinedload(Process.documents),
+            joinedload(Submission.documents),
+        )
+        .filter(Submission.id == submission.id)
+        .first()
+    )
+
     logger.info(f"Submission opened: {submission.id}")
 
     return success_response(
@@ -311,7 +330,10 @@ def list_submissions(
     process_id: Optional[str] = None,
     db: Session = db_dependency,
 ):
-    query = db.query(Submission)
+    query = db.query(Submission).options(
+        joinedload(Submission.process).joinedload(Process.documents),
+        joinedload(Submission.documents),
+    )
 
     if process_id:
         query = query.filter(Submission.process_id == process_id)
