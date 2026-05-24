@@ -8,18 +8,23 @@ class ExtractedField(BaseModel):
     value: Optional[str]
     confidence: float = Field(ge=0, le=100)
 
-    class Config:
-        json_schema_extra = {"example": {"value": "Emeka Obi", "confidence": 94.5}}
+    model_config = {
+        "json_schema_extra": {"example": {"value": "Emeka Obi", "confidence": 94.5}}
+    }
 
 
 class DocumentFlag(BaseModel):
     type: str = Field(description="ok | warn | err")
     message: str
 
-    class Config:
-        json_schema_extra = {
-            "example": {"type": "ok", "message": "Document valid and not expired"}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "ok",
+                "message": "Document valid and not expired",
+            }
         }
+    }
 
 
 class DocumentOut(BaseModel):
@@ -37,9 +42,9 @@ class DocumentOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-        json_schema_extra = {
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
             "example": {
                 "document_id": "doc_r7tn4q12",
                 "submission_id": "sub_k9m2xp12",
@@ -50,20 +55,35 @@ class DocumentOut(BaseModel):
                 "matched_doc_id": 1,
                 "overall_confidence": 91.5,
                 "extracted_fields": {
-                    "Full Name": {"value": "Emeka Obi", "confidence": 94},
-                    "NIN": {"value": "12345678901", "confidence": 97},
-                    "Date of Birth": {"value": "1990-03-15", "confidence": 89},
+                    "Full Name": {
+                        "value": "Emeka Obi",
+                        "confidence": 94,
+                    },
+                    "NIN": {
+                        "value": "12345678901",
+                        "confidence": 97,
+                    },
+                    "Date of Birth": {
+                        "value": "1990-03-15",
+                        "confidence": 89,
+                    },
                     "Address": {
                         "value": "12 Adeola Odeku Street, Victoria Island, Lagos",
                         "confidence": 82,
                     },
                 },
-                "flags": [{"type": "ok", "message": "Document valid and not expired"}],
+                "flags": [
+                    {
+                        "type": "ok",
+                        "message": "Document valid and not expired",
+                    }
+                ],
                 "summary": "Valid NIN slip issued by NIMC. All fields clearly legible.",
-                "created_at": "2025-05-20T10:20:00",
-                "updated_at": "2025-05-20T10:20:45",
+                "created_at": "2025-05-20T10:20:00Z",
+                "updated_at": "2025-05-20T10:20:45Z",
             }
-        }
+        },
+    }
 
 
 class DocumentUploadOut(BaseModel):
@@ -72,17 +92,20 @@ class DocumentUploadOut(BaseModel):
     document_id: str
     submission_id: str
     filename: str
+    mime_type: str
     status: str
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "document_id": "doc_r7tn4q12",
                 "submission_id": "sub_k9m2xp12",
                 "filename": "nin_slip.pdf",
+                "mime_type": "application/pdf",
                 "status": "processing",
             }
         }
+    }
 
 
 class DocumentListData(BaseModel):

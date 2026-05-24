@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
 from config.settings import settings
-from routers import processes, submissions
+from routers import documents, processes, submissions
 
 logger = get_logger(__name__)
 
@@ -121,6 +121,11 @@ app.include_router(
     submissions.router,
     prefix="/v1/submissions",
     tags=["Submissions"],
+)
+app.include_router(
+    documents.router,
+    prefix="/v1/documents",
+    tags=["Documents"],
 )
 
 
