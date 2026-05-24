@@ -3,9 +3,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-# Request schemas
 
-
+# ── Request schemas ────────────────────────────────────────────────────────
 class SubmissionCreate(BaseModel):
     process_id: str = Field(
         ...,
@@ -25,25 +24,30 @@ class SubmissionCreate(BaseModel):
         examples=["usr_emeka_obi"],
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "process_id": "proc_a1b2c3d4e5f6",
                 "reference": "APP-2025-001",
                 "applicant_id": "usr_emeka_obi",
             }
         }
+    }
 
 
-# Response schemas
-
-
+# ── Response schemas ───────────────────────────────────────────────────────
 class SubmissionProgress(BaseModel):
     classified: int = Field(description="Documents successfully classified")
     required: int = Field(description="Total documents required by process")
 
-    class Config:
-        json_schema_extra = {"example": {"classified": 5, "required": 22}}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "classified": 5,
+                "required": 22,
+            }
+        }
+    }
 
 
 class SubmissionOut(BaseModel):
@@ -57,9 +61,9 @@ class SubmissionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-        json_schema_extra = {
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
             "example": {
                 "submission_id": "sub_k9m2xp12",
                 "process_id": "proc_a1b2c3d4e5f6",
@@ -71,9 +75,32 @@ class SubmissionOut(BaseModel):
                 "created_at": "2025-05-20T10:15:00",
                 "updated_at": "2025-05-20T11:30:00",
             }
-        }
+        },
+    }
 
 
 class SubmissionListData(BaseModel):
     items: List[SubmissionOut]
     total: int
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "items": [
+                    {
+                        "submission_id": "sub_k9m2xp12",
+                        "process_id": "proc_a1b2c3d4e5f6",
+                        "process_name": "RSA Mortgage",
+                        "reference": "APP-2025-001",
+                        "applicant_id": "usr_emeka_obi",
+                        "status": "in_progress",
+                        "progress": {"classified": 5, "required": 22},
+                        "documents_uploaded": 5,
+                        "created_at": "2025-05-20T10:15:00Z",
+                        "updated_at": "2025-05-20T11:30:00Z",
+                    }
+                ],
+                "total": 1,
+            }
+        }
+    }
