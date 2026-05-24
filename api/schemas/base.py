@@ -1,5 +1,6 @@
-from pydantic import BaseModel
 from typing import Any, Generic, Optional, TypeVar
+
+from pydantic import BaseModel
 
 # Generic type for the data payload
 T = TypeVar("T")
@@ -31,12 +32,8 @@ class APIResponse(BaseModel, Generic[T]):
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
-            "example": {
-                "success": True,
-                "message": "Request successful",
-                "data": {}
-            }
-        }
+            "example": {"success": True, "message": "Request successful", "data": {}}
+        },
     }
 
 
@@ -63,8 +60,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 # Helpers: call these in every router
 def success_response(
-    message: str = "Request successful",
     data: Any = None,
+    message: str = "Request successful",
 ) -> dict:
     """
     Returns a standard success response dict.

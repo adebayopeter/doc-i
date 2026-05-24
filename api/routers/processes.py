@@ -18,12 +18,9 @@ from schemas.base import error_response, success_response
 from schemas.process import (
     ProcessCreate,
     ProcessDeactivateData,
-    ProcessDeactivateResponse,
     ProcessDetail,
-    ProcessDetailResponse,
     ProcessDocumentOut,
     ProcessListData,
-    ProcessListResponse,
     ProcessSummary,
 )
 
@@ -33,45 +30,67 @@ logger = get_logger(__name__)
 db_dependency = Depends(get_db)
 auth_dependency = Depends(verify_api_key)
 
+# ── Shared error response examples ────────────────────────────────────────
+# Defined once and reused across all endpoints to avoid repetition
+_401 = {
+    "description": "Unauthorised — missing or invalid API key",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Invalid API key",
+                "data": None,
+            }
+        }
+    },
+}
+
+_404 = {
+    "description": "Process not found",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Process not found",
+                "data": None,
+            }
+        }
+    },
+}
+
+_422 = {
+    "description": "Validation error — request body failed schema validation",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "name: field required | documents: list should have at least 1 item",
+                "data": None,
+            }
+        }
+    },
+}
+
+_500 = {
+    "description": "Internal server error",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "An unexpected error occurred",
+                "data": None,
+            }
+        }
+    },
+}
+
 router = APIRouter(
     dependencies=[auth_dependency],
     responses={
-        401: {
-            "description": "Unauthorised — missing or invalid API key",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "success": False,
-                        "message": "Invalid API key",
-                        "data": None,
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Process not found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "success": False,
-                        "message": "Process not found",
-                        "data": None,
-                    }
-                }
-            },
-        },
-        500: {
-            "description": "Internal server error",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "success": False,
-                        "message": "An unexpected error occurred",
-                        "data": None,
-                    }
-                }
-            },
-        },
+        401: _401,
+        404: _404,
+        422: _422,
+        500: _500,
     },
 )
 
@@ -136,7 +155,6 @@ def _build_process_detail(process: Process) -> ProcessDetail:
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    response_model=ProcessDetailResponse,
     summary="Create a new process",
     description=(
         "Creates a reusable process definition with a required document checklist. "
@@ -146,6 +164,52 @@ def _build_process_detail(process: Process) -> ProcessDetail:
     ),
     response_description="Process created successfully",
     responses={
+        201: {
+            "description": "Process created successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process created successfully",
+                        "data": {
+                            "process_id": "proc_a1b2c3d4e5f6",
+                            "name": "RSA Mortgage",
+                            "description": (
+                                "Residential mortgage application"
+                                " — 22 required documents"
+                            ),
+                            "color_var": "info",
+                            "icon": "ti-home-2",
+                            "document_count": 3,
+                            "documents": [
+                                {
+                                    "id": 1,
+                                    "name": "National ID / NIN slip",
+                                    "category": "Identity",
+                                    "is_required": True,
+                                    "sort_order": 0,
+                                },
+                                {
+                                    "id": 2,
+                                    "name": "Bank statement (6 months)",
+                                    "category": "Financial",
+                                    "is_required": True,
+                                    "sort_order": 1,
+                                },
+                                {
+                                    "id": 3,
+                                    "name": "Offer letter",
+                                    "category": "Income",
+                                    "is_required": False,
+                                    "sort_order": 2,
+                                },
+                            ],
+                            "created_at": "2025-05-20T10:00:00Z",
+                        },
+                    }
+                }
+            },
+        },
         409: {
             "description": "A process with this name already exists",
             "content": {
@@ -157,7 +221,8 @@ def _build_process_detail(process: Process) -> ProcessDetail:
                     }
                 }
             },
-        }
+        },
+        422: _422,
     },
 )
 def create_process(
@@ -230,7 +295,6 @@ def create_process(
 # ── GET /v1/processes ──────────────────────────────────────────────────────
 @router.get(
     "",
-    response_model=ProcessListResponse,
     summary="List all processes",
     description=(
         "Returns all active processes. "
@@ -238,6 +302,53 @@ def create_process(
         "Use GET /v1/processes/{process_id} to get the full document list."
     ),
     response_description="List of processes retrieved successfully",
+    responses={
+        200: {
+            "description": "Processes retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Processes retrieved successfully",
+                        "data": {
+                            "items": [
+                                {
+                                    "process_id": "proc_a1b2c3d4e5f6",
+                                    "name": "RSA Mortgage",
+                                    "description": ("Residential mortgage application"),
+                                    "document_count": 22,
+                                    "color_var": "info",
+                                    "icon": "ti-home-2",
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                                {
+                                    "process_id": "proc_b2c3d4e5f6a1",
+                                    "name": "Benefit Application",
+                                    "description": ("Government benefit eligibility"),
+                                    "document_count": 10,
+                                    "color_var": "success",
+                                    "icon": "ti-coin",
+                                    "created_at": "2025-05-20T11:00:00Z",
+                                },
+                                {
+                                    "process_id": "proc_c3d4e5f6a1b2",
+                                    "name": "Employee Onboarding",
+                                    "description": (
+                                        "New employee right-to-work checks"
+                                    ),
+                                    "document_count": 8,
+                                    "color_var": "warning",
+                                    "icon": "ti-users",
+                                    "created_at": "2025-05-20T12:00:00Z",
+                                },
+                            ],
+                            "total": 3,
+                        },
+                    }
+                }
+            },
+        },
+    },
 )
 def list_processes(db: Session = db_dependency):
     """
@@ -264,7 +375,6 @@ def list_processes(db: Session = db_dependency):
 # ── GET /v1/processes/{process_id} ────────────────────────────────────────
 @router.get(
     "/{process_id}",
-    response_model=ProcessDetailResponse,
     summary="Get a process",
     description=(
         "Returns full process details including the complete document checklist. "
@@ -272,6 +382,69 @@ def list_processes(db: Session = db_dependency):
         "which documents they need to upload."
     ),
     response_description="Process retrieved successfully",
+    responses={
+        200: {
+            "description": "Process retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process retrieved successfully",
+                        "data": {
+                            "process_id": "proc_a1b2c3d4e5f6",
+                            "name": "RSA Mortgage",
+                            "description": (
+                                "Residential mortgage application"
+                                " — 22 required documents"
+                            ),
+                            "color_var": "info",
+                            "icon": "ti-home-2",
+                            "document_count": 5,
+                            "documents": [
+                                {
+                                    "id": 1,
+                                    "name": "National ID / NIN slip",
+                                    "category": "Identity",
+                                    "is_required": True,
+                                    "sort_order": 0,
+                                },
+                                {
+                                    "id": 2,
+                                    "name": "Utility bill (proof of address)",
+                                    "category": "Identity",
+                                    "is_required": True,
+                                    "sort_order": 1,
+                                },
+                                {
+                                    "id": 3,
+                                    "name": "Bank statement (6 months)",
+                                    "category": "Financial",
+                                    "is_required": True,
+                                    "sort_order": 2,
+                                },
+                                {
+                                    "id": 4,
+                                    "name": "Offer letter / Employment letter",
+                                    "category": "Income",
+                                    "is_required": True,
+                                    "sort_order": 3,
+                                },
+                                {
+                                    "id": 5,
+                                    "name": "Guarantor letter",
+                                    "category": "Supporting",
+                                    "is_required": False,
+                                    "sort_order": 4,
+                                },
+                            ],
+                            "created_at": "2025-05-20T10:00:00Z",
+                        },
+                    }
+                }
+            },
+        },
+        404: _404,
+    },
 )
 def get_process(
     process_id: str,
@@ -293,7 +466,6 @@ def get_process(
 # ── DELETE /v1/processes/{process_id} ────────────────────────────────────
 @router.delete(
     "/{process_id}",
-    response_model=ProcessDeactivateResponse,
     status_code=status.HTTP_200_OK,
     summary="Deactivate a process",
     description=(
@@ -302,6 +474,23 @@ def get_process(
         "The process will no longer appear in list results."
     ),
     response_description="Process deactivated successfully",
+    responses={
+        200: {
+            "description": "Process deactivated successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process deactivated successfully",
+                        "data": {
+                            "process_id": "proc_a1b2c3d4e5f6",
+                        },
+                    }
+                }
+            },
+        },
+        404: _404,
+    },
 )
 def delete_process(
     process_id: str,
