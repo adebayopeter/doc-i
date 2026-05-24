@@ -53,6 +53,7 @@ class SubmissionProgress(BaseModel):
 class SubmissionOut(BaseModel):
     submission_id: str
     process_id: str
+    process_name: str
     reference: Optional[str]
     applicant_id: Optional[str]
     status: str
@@ -67,6 +68,7 @@ class SubmissionOut(BaseModel):
             "example": {
                 "submission_id": "sub_k9m2xp12",
                 "process_id": "proc_a1b2c3d4e5f6",
+                "process_name": "RSA Mortgage",
                 "reference": "APP-2025-001",
                 "applicant_id": "usr_emeka_obi",
                 "status": "in_progress",

@@ -106,8 +106,6 @@ router = APIRouter(
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-
 def _get_submission_or_404(submission_id: str, db: Session) -> Submission:
     """Fetch a submission by ID. Raises 404 if not found."""
     submission = (
@@ -150,9 +148,34 @@ def _build_submission_out(submission: Submission) -> SubmissionOut:
     )
 
 
+def _build_submission_out_with_process(
+    submission: Submission,
+    process: Process,
+) -> SubmissionOut:
+    """
+    Build a SubmissionOut using an explicitly provided process.
+    Used in create_submission where the process is already fetched
+    and the relationship may not be loaded on the fresh submission.
+    """
+    classified = len([d for d in submission.documents if d.status == "classified"])
+    return SubmissionOut(
+        submission_id=submission.id,
+        process_id=submission.process_id,
+        process_name=process.name,
+        reference=submission.reference,
+        applicant_id=submission.applicant_id,
+        status=submission.status,
+        progress=SubmissionProgress(
+            classified=classified,
+            required=len(process.documents),
+        ),
+        documents_uploaded=len(submission.documents),
+        created_at=submission.created_at,
+        updated_at=submission.updated_at,
+    )
+
+
 # ── POST /v1/submissions ───────────────────────────────────────────────────
-
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -222,7 +245,7 @@ def create_submission(
         db.query(Process)
         .filter(
             Process.id == payload.process_id,
-            Process.is_active == True,  # noqa: E712
+            Process.is_active.is_(True),  # noqa: E712
         )
         .first()
     )
@@ -246,21 +269,10 @@ def create_submission(
     db.commit()
     db.refresh(submission)
 
-    # Reload with relationships eagerly loaded
-    submission = (
-        db.query(Submission)
-        .options(
-            joinedload(Submission.process).joinedload(Process.documents),
-            joinedload(Submission.documents),
-        )
-        .filter(Submission.id == submission.id)
-        .first()
-    )
-
     logger.info(f"Submission opened: {submission.id}")
 
     return success_response(
-        data=_build_submission_out(submission),
+        data=_build_submission_out_with_process(submission, process),
         message="Submission opened successfully",
     )
 
