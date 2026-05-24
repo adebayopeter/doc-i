@@ -29,6 +29,13 @@ logger = get_logger(__name__)
 db_dependency = Depends(get_db)
 auth_dependency = Depends(verify_api_key)
 
+file_upload = (
+    File(
+        ...,
+        description="Document file — PDF, PNG, JPG, WEBP or TIFF. Max 20MB.",
+    ),
+)
+
 # ── Allowed MIME types ─────────────────────────────────────────────────────
 ALLOWED_MIME_TYPES = {
     "application/pdf",
@@ -268,10 +275,7 @@ def _store_file_locally(
 )
 async def upload_document(
     submission_id: str,
-    file: UploadFile = File(
-        ...,
-        description="Document file — PDF, PNG, JPG, WEBP or TIFF. Max 20MB.",
-    ),
+    file: UploadFile = file_upload,
     db: Session = db_dependency,
 ):
     # Verify submission exists
