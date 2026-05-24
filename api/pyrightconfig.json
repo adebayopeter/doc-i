@@ -4,5 +4,6 @@
   "venvPath": "../",
   "venv": "venv",
   "include": ["."],
-  "extraPaths": ["."]
+  "extraPaths": ["."],
+  "reportGeneralTypeIssues": "none"
 }

@@ -16,3 +16,5 @@ factory-boy==3.3.0
 
 # Dev utilities
 ipython==8.24.0
+
+sqlalchemy2-stubs==0.0.2a38
