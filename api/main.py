@@ -139,8 +139,42 @@ app.include_router(
     "/health",
     tags=["Health"],
     summary="Health check",
-    description="Returns API status. No authentication required.",
+    description=(
+        "Returns the current API status, version, and environment. "
+        "No authentication required. Use this endpoint to verify "
+        "the API is running before making other requests."
+    ),
     response_description="API is running",
+    responses={
+        200: {
+            "description": "API is running",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "API is running",
+                        "data": {
+                            "status": "ok",
+                            "version": "1.0.0",
+                            "environment": "development",
+                        },
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "API is not healthy",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": "An unexpected error occurred",
+                        "data": None,
+                    }
+                }
+            },
+        },
+    },
 )
 async def health():
     return {
