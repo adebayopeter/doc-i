@@ -205,7 +205,23 @@ class ValidationRule(Base):
         return f"<ValidationRule id={self.id} name={self.name}>"
 
 
-# 6. AuditLog
+# 6. DocumentCategory
+class DocumentCategory(Base):
+    """
+    Managed list of document categories.
+    Used when configuring document checklists on processes.
+    """
+
+    __tablename__ = "document_categories"
+
+    id = Column(String, primary_key=True, default=lambda: _gen_id("cat"))
+    name = Column(String, nullable=False, unique=True)
+    description = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+# 7. AuditLog
 class AuditLog(Base):
     """
     Immutable record of every significant event on a submission.

@@ -101,6 +101,17 @@ def check_api_health() -> bool:
         return False
 
 
+def get_categories() -> list:
+    """
+    Fetches active categories from the API.
+    Returns a list of name strings for use in dropdowns.
+    """
+    category = api_get("/v1/config/categories")
+    if category.get("success"):
+        return [c["name"] for c in category["data"].get("items", [])]
+    return []
+
+
 # ── Colours ────────────────────────────────────────────────────────────────
 DECISION_COLOUR = {
     "auto": "🟢",
@@ -124,6 +135,7 @@ defaults = {
     "selected_process_id": None,
     "selected_submission_id": None,
     "active_page": "Processes",
+    "categories_cache": None,
 }
 for key, value in defaults.items():
     if key not in st.session_state:
@@ -219,11 +231,19 @@ if page_name == "Processes":
                         placeholder="e.g. National ID / NIN slip",
                     )
                 with c2:
-                    doc_cat = st.text_input(
-                        f"Category",
-                        key=f"doc_cat_{i}",
-                        placeholder="e.g. Identity",
-                    )
+                    all_categories = get_categories()
+                    if all_categories:
+                        doc_cat = st.selectbox(
+                            "Category",
+                            options=all_categories,
+                            key=f"doc_cat_{i}",
+                        )
+                    else:
+                        doc_cat = st.text_input(
+                            "Category",
+                            key=f"doc_cat_{i}",
+                            placeholder="No categories yet — add them in Config",
+                        )
                 with c3:
                     doc_req = st.checkbox(
                         "Required",
@@ -908,7 +928,7 @@ elif page_name == "Config":
         "Changes take effect immediately."
     )
 
-    tab1, tab2 = st.tabs(["📏 Validation Rules", "🎚️ Thresholds"])
+    tab1, tab2, tab3 = st.tabs(["📏 Validation Rules", "🎚️ Thresholds", "📂 Categories"])
 
     # ── Tab 1: Validation rules ────────────────────────────────────────
     with tab1:
@@ -1072,3 +1092,161 @@ elif page_name == "Config":
                     st.error(
                         f"❌ {result.get('message', 'Update failed')}"
                     )
+
+    # ── Tab 3: Categories ──────────────────────────────────────────────
+    with tab3:
+        st.subheader("Document Categories")
+        st.caption(
+            "Create categories here first. They appear as dropdowns "
+            "when configuring document checklists on processes."
+        )
+
+        # Create new category
+        with st.form("create_category"):
+            col1, col2 = st.columns([3, 4])
+            with col1:
+                new_cat_name = st.text_input(
+                    "Category Name *",
+                    placeholder="e.g. Identity",
+                )
+            with col2:
+                new_cat_desc = st.text_input(
+                    "Description",
+                    placeholder="e.g. Government-issued identity documents",
+                )
+            cat_submitted = st.form_submit_button(
+                "Add Category", type="primary", use_container_width=True
+            )
+
+        if cat_submitted:
+            if not new_cat_name:
+                st.error("Category name is required.")
+            else:
+                result = api_post(
+                    "/v1/config/categories",
+                    json={
+                        "name": new_cat_name,
+                        "description": new_cat_desc or None,
+                    },
+                )
+                if result.get("success"):
+                    st.success(
+                        f"✅ Category **{new_cat_name}** added successfully."
+                    )
+                    st.rerun()
+                else:
+                    st.error(
+                        f"❌ {result.get('message', 'Failed to add category')}"
+                    )
+
+        st.divider()
+
+        # List and manage categories
+        cat_result = api_get("/v1/config/categories?include_inactive=true")
+        if not cat_result.get("success"):
+            st.error(cat_result.get("message"))
+        else:
+            cat_data = cat_result["data"]
+            categories = cat_data.get("items", [])
+            total = cat_data.get("total", 0)
+            active = cat_data.get("active", 0)
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total", total)
+            col2.metric("Active", active)
+            col3.metric("Inactive", total - active)
+
+            st.divider()
+
+            if total == 0:
+                st.info(
+                    "No categories yet. Add your first one above.\n\n"
+                    "**Suggested categories for Nigerian document processing:**\n"
+                    "Identity · Financial · Income · Supporting · Legal · Property"
+                )
+            else:
+                for cat in categories:
+                    active_icon = "✅" if cat["is_active"] else "⏸️"
+                    with st.container(border=True):
+                        col1, col2, col3, col4 = st.columns([3, 4, 2, 2])
+                        with col1:
+                            st.markdown(
+                                f"{active_icon} **{cat['name']}**"
+                            )
+                            st.caption(f"`{cat['id']}`")
+                        with col2:
+                            desc = cat.get("description") or "—"
+                            st.caption(desc)
+                        with col3:
+                            toggle_label = (
+                                "Deactivate" if cat["is_active"] else "Reactivate"
+                            )
+                            if st.button(
+                                toggle_label,
+                                key=f"cat_toggle_{cat['id']}",
+                                use_container_width=True,
+                            ):
+                                if cat["is_active"]:
+                                    api_delete(
+                                        f"/v1/config/categories/{cat['id']}"
+                                    )
+                                else:
+                                    api_post(
+                                        "/v1/config/categories",
+                                        json={"name": cat["name"]},
+                                    )
+                                st.rerun()
+                        with col4:
+                            if st.button(
+                                "✏️ Rename",
+                                key=f"cat_rename_{cat['id']}",
+                                use_container_width=True,
+                            ):
+                                st.session_state[
+                                    f"renaming_{cat['id']}"
+                                ] = True
+
+                    # Inline rename form
+                    if st.session_state.get(f"renaming_{cat['id']}"):
+                        with st.form(key=f"rename_form_{cat['id']}"):
+                            new_name = st.text_input(
+                                "New name",
+                                value=cat["name"],
+                                key=f"rename_input_{cat['id']}",
+                            )
+                            new_desc = st.text_input(
+                                "New description",
+                                value=cat.get("description") or "",
+                                key=f"rename_desc_{cat['id']}",
+                            )
+                            col_save, col_cancel = st.columns(2)
+                            with col_save:
+                                save = st.form_submit_button(
+                                    "Save", use_container_width=True
+                                )
+                            with col_cancel:
+                                cancel = st.form_submit_button(
+                                    "Cancel", use_container_width=True
+                                )
+
+                        if save:
+                            result = api_patch(
+                                f"/v1/config/categories/{cat['id']}",
+                            )
+                            # Use direct requests for PATCH with JSON body
+                            import requests as req
+
+                            req.patch(
+                                f"{API_BASE}/v1/config/categories/{cat['id']}",
+                                headers=HEADERS,
+                                json={
+                                    "name": new_name,
+                                    "description": new_desc or None,
+                                },
+                                timeout=10,
+                            )
+                            st.session_state[f"renaming_{cat['id']}"] = False
+                            st.rerun()
+                        if cancel:
+                            st.session_state[f"renaming_{cat['id']}"] = False
+                            st.rerun()
