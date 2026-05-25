@@ -34,6 +34,12 @@ auth_dependency = Depends(verify_api_key)
 # In production, persist to a config table in PostgreSQL.
 _current_thresholds = dict(DEFAULT_THRESHOLDS)
 
+
+def get_current_thresholds() -> dict:
+    """Returns the live threshold dict — called at request time."""
+    return _current_thresholds
+
+
 # ── Shared response examples ───────────────────────────────────────────────
 _401 = {
     "description": "Unauthorised — missing or invalid API key",

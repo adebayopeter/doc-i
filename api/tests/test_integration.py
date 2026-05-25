@@ -742,11 +742,14 @@ class TestStep8ConfigAdjustment:
         Every field should become review or manual.
         """
         # Tighten thresholds
-        client.put(
+        put_response = client.put(
             f"{CONFIG_BASE}/thresholds",
             json={"auto_above": 99, "manual_below": 95},
             headers=api_key_headers,
         )
+        assert (
+            put_response.status_code == 200
+        ), f"Threshold PUT failed: {put_response.json()}"
 
         sid = submission_with_documents["submission"]["submission_id"]
         response = client.get(

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Submission, SubmissionDocument, ValidationRule
-from routers.config import _current_thresholds
+from routers.config import get_current_thresholds
 from schemas.base import error_response, success_response
 from services.aggregation import build_unified_record
 from services.decisioning import compute_decision
@@ -493,7 +493,7 @@ def get_decision(
     decision = compute_decision(
         record,
         validation_results,
-        thresholds=_current_thresholds,
+        thresholds=get_current_thresholds(),
     )
 
     logger.info(
