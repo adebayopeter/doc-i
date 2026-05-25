@@ -26,3 +26,9 @@ minio_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
