@@ -135,7 +135,6 @@ def _build_category_out(cat: DocumentCategory) -> dict:
 def create_category(
     payload: CategoryCreate,
     db: Session = db_dependency,
-    _: str = auth_dependency,
 ):
     # Check for duplicate name (case-insensitive)
     existing = (
@@ -225,7 +224,6 @@ def create_category(
 def list_categories(
     include_inactive: bool = False,
     db: Session = db_dependency,
-    _: str = auth_dependency,
 ):
     query = db.query(DocumentCategory)
     if not include_inactive:
@@ -274,7 +272,6 @@ def list_categories(
 def get_category(
     category_id: str,
     db: Session = db_dependency,
-    _: str = auth_dependency,
 ):
     category = _get_category_or_404(category_id, db)
     return success_response(
@@ -315,7 +312,6 @@ def update_category(
     category_id: str,
     payload: CategoryUpdate,
     db: Session = db_dependency,
-    _: str = auth_dependency,
 ):
     category = _get_category_or_404(category_id, db)
 
@@ -378,7 +374,6 @@ def update_category(
 def delete_category(
     category_id: str,
     db: Session = db_dependency,
-    _: str = auth_dependency,
 ):
     category = _get_category_or_404(category_id, db)
 
