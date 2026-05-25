@@ -18,13 +18,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def seed(reset: bool = False) -> None:
+def seed(reset: bool = False, session=None) -> None:
     from config.logging import get_logger
     from db.models import ValidationRule
-    from db.session import SessionLocal
 
     logger = get_logger(__name__)
-    db = SessionLocal()
+
+    # Use provided session (tests) or create a new one (production)
+    _owns_session = session is None
+    if _owns_session:
+        from db.session import SessionLocal
+
+        session = SessionLocal()
 
     # ── Default rules ──────────────────────────────────────────────────────
     # Nigerian-specific rules — NIN and BVN are 11-digit numbers,
@@ -131,11 +136,11 @@ def seed(reset: bool = False) -> None:
         if reset:
             logger.warning("Resetting all default validation rules...")
             deleted = (
-                db.query(ValidationRule)
+                session.query(ValidationRule)
                 .filter(ValidationRule.id.like("rule_default_%"))
                 .delete(synchronize_session=False)
             )
-            db.commit()
+            session.commit()
             logger.info(f"Deleted {deleted} existing default rules")
 
         added = 0
@@ -143,7 +148,7 @@ def seed(reset: bool = False) -> None:
 
         for rule_data in DEFAULT_RULES:
             existing = (
-                db.query(ValidationRule)
+                session.query(ValidationRule)
                 .filter(ValidationRule.id == rule_data["id"])
                 .first()
             )
@@ -151,10 +156,10 @@ def seed(reset: bool = False) -> None:
                 skipped += 1
                 continue
 
-            db.add(ValidationRule(**rule_data))
+            session.add(ValidationRule(**rule_data))
             added += 1
 
-        db.commit()
+        session.commit()
 
         logger.info(f"Seed complete — {added} rules added, {skipped} already existed")
         print(
@@ -165,13 +170,13 @@ def seed(reset: bool = False) -> None:
         )
 
     except Exception as e:
-        db.rollback()
+        session.rollback()
         logger.error(f"Seed failed: {e}")
         print(f"\n❌ Seed failed: {e}\n")
         sys.exit(1)
 
     finally:
-        db.close()
+        session.close()
 
 
 if __name__ == "__main__":

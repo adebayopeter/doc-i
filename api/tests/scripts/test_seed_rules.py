@@ -13,7 +13,7 @@ class TestSeedRules:
         # Confirm no rules exist yet
         count_before = db_session.query(ValidationRule).count()
 
-        seed()
+        seed(session=db_session)
 
         count_after = db_session.query(ValidationRule).count()
         assert count_after > count_before
@@ -22,10 +22,10 @@ class TestSeedRules:
         """Running seed twice does not create duplicate rules."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
         count_after_first = db_session.query(ValidationRule).count()
 
-        seed()
+        seed(session=db_session)
         count_after_second = db_session.query(ValidationRule).count()
 
         assert count_after_first == count_after_second
@@ -34,7 +34,7 @@ class TestSeedRules:
         """Seed must create required-type rules."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         required_rules = (
             db_session.query(ValidationRule)
@@ -47,7 +47,7 @@ class TestSeedRules:
         """Seed must create format rules including NIN and BVN."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         nin_rule = (
             db_session.query(ValidationRule)
@@ -69,7 +69,7 @@ class TestSeedRules:
         """Seed must create logical rules for age and expiry checks."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         logical_rules = (
             db_session.query(ValidationRule)
@@ -86,7 +86,7 @@ class TestSeedRules:
         """Seed must create at least one cross_doc rule."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         cross_doc_rules = (
             db_session.query(ValidationRule)
@@ -99,7 +99,7 @@ class TestSeedRules:
         """All seeded rules must be enabled by default."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         disabled = (
             db_session.query(ValidationRule)
@@ -115,7 +115,7 @@ class TestSeedRules:
         """NIN rule must have the 11-digit pattern."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         nin_rule = (
             db_session.query(ValidationRule)
@@ -128,7 +128,7 @@ class TestSeedRules:
         """Account number rule must have the 10-digit NUBAN pattern."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
 
         rule = (
             db_session.query(ValidationRule)
@@ -141,7 +141,7 @@ class TestSeedRules:
         """Reset flag removes existing default rules and re-seeds."""
         from scripts.seed_rules import seed
 
-        seed()
+        seed(session=db_session)
         count_after_first = (
             db_session.query(ValidationRule)
             .filter(ValidationRule.id.like("rule_default_%"))
