@@ -1,0 +1,527 @@
+"""
+Config router — /v1/config
+
+Manages platform-wide configuration — validation rules and
+confidence thresholds. Changes take effect immediately on all
+subsequent analysis requests. No redeploy required.
+
+Endpoints:
+    GET    /v1/config/rules              List all validation rules
+    GET    /v1/config/rules/{rule_id}    Get a single rule
+    PATCH  /v1/config/rules/{rule_id}    Enable, disable or adjust a rule
+    GET    /v1/config/thresholds         Get current confidence thresholds
+    PUT    /v1/config/thresholds         Update confidence thresholds
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from config.dependencies import get_db, verify_api_key
+from config.logging import get_logger
+from db.models import ValidationRule
+from schemas.base import error_response, success_response
+from schemas.config import RuleUpdate, ThresholdUpdate
+from services.decisioning import DEFAULT_THRESHOLDS
+
+logger = get_logger(__name__)
+
+# ── Module-level dependencies ──────────────────────────────────────────────
+db_dependency = Depends(get_db)
+auth_dependency = Depends(verify_api_key)
+
+# ── In-memory threshold store ──────────────────────────────────────────────
+# For MVP, thresholds are stored in memory.
+# In production, persist to a config table in PostgreSQL.
+_current_thresholds = dict(DEFAULT_THRESHOLDS)
+
+# ── Shared response examples ───────────────────────────────────────────────
+_401 = {
+    "description": "Unauthorised — missing or invalid API key",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Invalid API key",
+                "data": None,
+            }
+        }
+    },
+}
+
+_404_rule = {
+    "description": "Rule not found",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Validation rule not found",
+                "data": None,
+            }
+        }
+    },
+}
+
+_500 = {
+    "description": "Internal server error",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "An unexpected error occurred",
+                "data": None,
+            }
+        }
+    },
+}
+
+router = APIRouter(
+    dependencies=[auth_dependency],
+    responses={401: _401, 500: _500},
+)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+def _get_rule_or_404(rule_id: str, db: Session) -> ValidationRule:
+    """Fetch a validation rule by ID. Raises 404 if not found."""
+    rule = db.query(ValidationRule).filter(ValidationRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response("Validation rule not found"),
+        )
+    return rule
+
+
+def _build_rule_out(rule: ValidationRule) -> dict:
+    """Build a rule response dict from a ValidationRule ORM object."""
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "rule_type": rule.rule_type,
+        "field": rule.field,
+        "check": rule.check,
+        "pattern": rule.pattern,
+        "severity": rule.severity,
+        "is_enabled": rule.is_enabled,
+        "created_at": (rule.created_at.isoformat() if rule.created_at else None),
+    }
+
+
+# ── GET /v1/config/rules ──────────────────────────────────────────────────
+@router.get(
+    "/rules",
+    summary="List all validation rules",
+    description=(
+        "Returns all validation rules with their current enabled state. "
+        "Rules are applied during validation analysis. "
+        "Disabled rules return status `skip` and do not affect the "
+        "validation summary. \n\n"
+        "**Rule types:**\n"
+        "- `required` — field must be present and non-null\n"
+        "- `format` — value must match a regex pattern\n"
+        "- `logical` — date/age/expiry check\n"
+        "- `cross_doc` — value must be consistent across documents"
+    ),
+    response_description="Rules retrieved successfully",
+    responses={
+        200: {
+            "description": "Rules retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Validation rules retrieved successfully",
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "rule_r01a2b3c4d5e",
+                                    "name": "Full name required",
+                                    "rule_type": "required",
+                                    "field": "Full Name",
+                                    "check": None,
+                                    "pattern": None,
+                                    "severity": "error",
+                                    "is_enabled": True,
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                                {
+                                    "id": "rule_r09a2b3c4d5e",
+                                    "name": "NIN format (11 digits)",
+                                    "rule_type": "format",
+                                    "field": "NIN",
+                                    "check": None,
+                                    "pattern": r"^\d{11}$",
+                                    "severity": "error",
+                                    "is_enabled": True,
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                                {
+                                    "id": "rule_r04a2b3c4d5e",
+                                    "name": "Applicant aged 18 or over",
+                                    "rule_type": "logical",
+                                    "field": "Date of Birth",
+                                    "check": "min_age_18",
+                                    "pattern": None,
+                                    "severity": "error",
+                                    "is_enabled": True,
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                            ],
+                            "total": 12,
+                            "enabled": 11,
+                            "disabled": 1,
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+def list_rules(db: Session = db_dependency):
+    rules = db.query(ValidationRule).order_by(ValidationRule.created_at.asc()).all()
+    enabled = len([r for r in rules if r.is_enabled])
+
+    logger.info(f"Listed {len(rules)} validation rules ({enabled} enabled)")
+
+    return success_response(
+        data={
+            "items": [_build_rule_out(r) for r in rules],
+            "total": len(rules),
+            "enabled": enabled,
+            "disabled": len(rules) - enabled,
+        },
+        message="Validation rules retrieved successfully",
+    )
+
+
+# ── GET /v1/config/rules/{rule_id} ────────────────────────────────────────
+@router.get(
+    "/rules/{rule_id}",
+    summary="Get a validation rule",
+    description=(
+        "Returns a single validation rule by ID including its current "
+        "enabled state, type, field, and any pattern or check configured."
+    ),
+    response_description="Rule retrieved successfully",
+    responses={
+        200: {
+            "description": "Rule retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Validation rule retrieved successfully",
+                        "data": {
+                            "id": "rule_r01a2b3c4d5e",
+                            "name": "Full name required",
+                            "rule_type": "required",
+                            "field": "Full Name",
+                            "check": None,
+                            "pattern": None,
+                            "severity": "error",
+                            "is_enabled": True,
+                            "created_at": "2025-05-20T10:00:00Z",
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_rule,
+    },
+)
+def get_rule(
+    rule_id: str,
+    db: Session = db_dependency,
+):
+    rule = _get_rule_or_404(rule_id, db)
+    logger.info(f"Retrieved rule: {rule_id}")
+
+    return success_response(
+        data=_build_rule_out(rule),
+        message="Validation rule retrieved successfully",
+    )
+
+
+# ── PATCH /v1/config/rules/{rule_id} ─────────────────────────────────────
+@router.patch(
+    "/rules/{rule_id}",
+    summary="Update a validation rule",
+    description=(
+        "Partially updates a validation rule. "
+        "Send only the fields you want to change — omit the rest.\n\n"
+        "Changes take effect immediately on all subsequent "
+        "validation requests. No redeploy required.\n\n"
+        "**What you can change:**\n"
+        "- `enabled` — toggle the rule on or off\n"
+        "- `severity` — change between `error` and `warning`\n\n"
+        "Rule type, field, check, and pattern are fixed at creation "
+        "and cannot be changed."
+    ),
+    response_description="Rule updated successfully",
+    responses={
+        200: {
+            "description": "Rule updated successfully",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "disable_rule": {
+                            "summary": "Disable a rule",
+                            "value": {
+                                "success": True,
+                                "message": "Validation rule updated successfully",
+                                "data": {
+                                    "id": "rule_r01a2b3c4d5e",
+                                    "name": "Full name required",
+                                    "rule_type": "required",
+                                    "field": "Full Name",
+                                    "check": None,
+                                    "pattern": None,
+                                    "severity": "error",
+                                    "is_enabled": False,
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                            },
+                        },
+                        "change_severity": {
+                            "summary": "Downgrade to warning",
+                            "value": {
+                                "success": True,
+                                "message": "Validation rule updated successfully",
+                                "data": {
+                                    "id": "rule_r05a2b3c4d5e",
+                                    "name": "Applicant under 75",
+                                    "rule_type": "logical",
+                                    "field": "Date of Birth",
+                                    "check": "max_age_75",
+                                    "pattern": None,
+                                    "severity": "warning",
+                                    "is_enabled": True,
+                                    "created_at": "2025-05-20T10:00:00Z",
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_rule,
+        422: {
+            "description": "Invalid severity value",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": (
+                            "Invalid severity 'critical'. "
+                            "Must be one of: error, warning"
+                        ),
+                        "data": None,
+                    }
+                }
+            },
+        },
+    },
+)
+def update_rule(
+    rule_id: str,
+    payload: RuleUpdate,
+    db: Session = db_dependency,
+):
+    rule = _get_rule_or_404(rule_id, db)
+
+    # Validate severity if provided
+    if payload.severity is not None:
+        if payload.severity not in {"error", "warning"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=error_response(
+                    f"Invalid severity '{payload.severity}'. "
+                    f"Must be one of: error, warning"
+                ),
+            )
+        rule.severity = payload.severity
+
+    if payload.enabled is not None:
+        rule.is_enabled = payload.enabled
+
+    db.commit()
+    db.refresh(rule)
+
+    logger.info(
+        f"Rule updated: {rule_id} "
+        f"enabled={rule.is_enabled} severity={rule.severity}"
+    )
+
+    return success_response(
+        data=_build_rule_out(rule),
+        message="Validation rule updated successfully",
+    )
+
+
+# ── GET /v1/config/thresholds ─────────────────────────────────────────────
+@router.get(
+    "/thresholds",
+    summary="Get confidence thresholds",
+    description=(
+        "Returns the current confidence thresholds used for routing decisions. "
+        "These thresholds determine whether a submission is auto-processed, "
+        "flagged for review, or requires manual input. \n\n"
+        "- Fields with confidence ≥ `auto_above` → **auto-process**\n"
+        "- Fields with confidence between `manual_below` and `auto_above` "
+        "→ **flag for review**\n"
+        "- Fields with confidence < `manual_below` → **manual input required**"
+    ),
+    response_description="Thresholds retrieved successfully",
+    responses={
+        200: {
+            "description": "Thresholds retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Thresholds retrieved successfully",
+                        "data": {
+                            "auto_above": 85,
+                            "manual_below": 60,
+                            "description": {
+                                "auto": "confidence ≥ 85% → auto-process",
+                                "review": ("60% ≤ confidence < 85% → flag for review"),
+                                "manual": "confidence < 60% → manual input",
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+def get_thresholds():
+    auto_above = _current_thresholds["autoAbove"]
+    manual_below = _current_thresholds["manualBelow"]
+
+    return success_response(
+        data={
+            "auto_above": auto_above,
+            "manual_below": manual_below,
+            "description": {
+                "auto": f"confidence ≥ {auto_above}% → auto-process",
+                "review": (
+                    f"{manual_below}% ≤ confidence < {auto_above}%"
+                    f" → flag for review"
+                ),
+                "manual": f"confidence < {manual_below}% → manual input",
+            },
+        },
+        message="Thresholds retrieved successfully",
+    )
+
+
+# ── PUT /v1/config/thresholds ─────────────────────────────────────────────
+@router.put(
+    "/thresholds",
+    summary="Update confidence thresholds",
+    description=(
+        "Updates the confidence thresholds used for routing decisions. "
+        "Changes take effect immediately on all subsequent decision requests.\n\n"
+        "`auto_above` must be greater than `manual_below` — "
+        "if they overlap the API returns 422."
+    ),
+    response_description="Thresholds updated successfully",
+    responses={
+        200: {
+            "description": "Thresholds updated successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Thresholds updated successfully",
+                        "data": {
+                            "auto_above": 90,
+                            "manual_below": 65,
+                            "previous": {
+                                "auto_above": 85,
+                                "manual_below": 60,
+                            },
+                            "description": {
+                                "auto": "confidence ≥ 90% → auto-process",
+                                "review": ("65% ≤ confidence < 90% → flag for review"),
+                                "manual": "confidence < 65% → manual input",
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Invalid threshold values",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "overlap": {
+                            "summary": "auto_above must be greater than manual_below",
+                            "value": {
+                                "success": False,
+                                "message": (
+                                    "auto_above (60) must be greater than "
+                                    "manual_below (60)"
+                                ),
+                                "data": None,
+                            },
+                        },
+                        "invalid_range": {
+                            "summary": "Values out of range",
+                            "value": {
+                                "success": False,
+                                "message": ("auto_above must be between 51 and 99"),
+                                "data": None,
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+def update_thresholds(payload: ThresholdUpdate):
+    global _current_thresholds
+
+    # Validate that auto_above > manual_below
+    if payload.auto_above <= payload.manual_below:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response(
+                f"auto_above ({payload.auto_above}) must be greater than "
+                f"manual_below ({payload.manual_below})"
+            ),
+        )
+
+    previous = {
+        "auto_above": _current_thresholds["autoAbove"],
+        "manual_below": _current_thresholds["manualBelow"],
+    }
+
+    _current_thresholds["autoAbove"] = payload.auto_above
+    _current_thresholds["manualBelow"] = payload.manual_below
+
+    logger.info(
+        f"Thresholds updated: "
+        f"auto_above={payload.auto_above} "
+        f"manual_below={payload.manual_below}"
+    )
+
+    return success_response(
+        data={
+            "auto_above": payload.auto_above,
+            "manual_below": payload.manual_below,
+            "previous": previous,
+            "description": {
+                "auto": (f"confidence ≥ {payload.auto_above}% → auto-process"),
+                "review": (
+                    f"{payload.manual_below}% ≤ confidence "
+                    f"< {payload.auto_above}% → flag for review"
+                ),
+                "manual": (f"confidence < {payload.manual_below}% → manual input"),
+            },
+        },
+        message="Thresholds updated successfully",
+    )
