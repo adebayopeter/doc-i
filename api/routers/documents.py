@@ -352,9 +352,12 @@ async def upload_document(
     # Queue async classification task
     # The worker calls Azure DocInt (OCR) then Claude (extraction)
     try:
+        import base64
+
         from workers.tasks import process_document
 
-        process_document.delay(document.id, submission_id, file_bytes)
+        file_bytes_b64 = base64.b64encode(file_bytes).decode()
+        process_document.delay(document.id, submission_id, file_bytes_b64)
         logger.info(f"Classification queued for document: {document.id}")
     except Exception as e:
         # Do not fail the upload if the queue is unavailable

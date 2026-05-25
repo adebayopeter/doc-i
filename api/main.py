@@ -28,7 +28,7 @@ app = FastAPI(
     version="1.0.0",
     contact={
         "name": "Document Intelligence Platform",
-        "email": "support@yourfirm.ng",
+        "email": "ict@access-armpensions.com",
     },
     license_info={
         "name": "Private — internal use only",

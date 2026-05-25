@@ -15,6 +15,9 @@ omit = [
     "schemas/document.py",
     # Exclude prod settings — only runs in production environment
     "config/settings/prod.py",
+    "services/ocr.py",         # calls Azure DocInt — external API
+    "services/extraction.py",  # calls Claude API — external API
+    "workers/tasks.py",        # calls Celery + all services — integration test
 ]
 
 [tool.coverage.report]
