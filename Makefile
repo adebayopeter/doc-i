@@ -1,4 +1,5 @@
-.PHONY: help dev stop reset migrate migration downgrade logs test lint pre-commit
+.PHONY: help dev stop reset migrate migration downgrade logs test lint pre-commit seed bucket
+
 
 help:
 	@echo ""
@@ -8,6 +9,10 @@ help:
 	@echo "  make migrate          Apply all pending migrations"
 	@echo "  make migration m=''   Generate a new migration"
 	@echo "  make downgrade        Rollback the last migration"
+	@echo "  make seed             Seed default validation rules"
+	@echo "  make seed-reset       Reset and re-seed all default rules"
+	@echo "  make bucket           Create MinIO documents bucket"
+	@echo "  make setup            Run all first-time setup steps"
 	@echo "  make logs             Tail api + worker logs"
 	@echo "  make test             Run test suite with coverage"
 	@echo "  make lint             Run flake8 linter"
@@ -41,6 +46,28 @@ migration:
 
 downgrade:
 	docker compose exec api alembic downgrade -1
+
+seed:
+	docker compose exec api python scripts/seed_rules.py
+
+seed-reset:
+	docker compose exec api python scripts/seed_rules.py --reset
+
+bucket:
+	docker compose exec api python scripts/create_minio_bucket.py
+
+setup:
+	@echo "Running first-time setup..."
+	docker compose up -d
+	@sleep 3
+	docker compose exec api alembic upgrade head
+	docker compose exec api python scripts/seed_rules.py
+	docker compose exec api python scripts/create_minio_bucket.py
+	@echo ""
+	@echo "✅ Setup complete"
+	@echo "   API:      http://localhost:8012"
+	@echo "   API docs: http://localhost:8012/docs"
+	@echo "   ReDoc:    http://localhost:8012/redoc"
 
 logs:
 	docker compose logs -f api worker

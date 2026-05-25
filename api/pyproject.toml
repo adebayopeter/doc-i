@@ -5,6 +5,7 @@ asyncio_mode = "auto"
 addopts = "-v --tb=short --cov=. --cov-report=term-missing"
 
 [tool.coverage.run]
+data_file = ".coverage"
 omit = [
     "tests/*",
     "alembic/*",
