@@ -174,21 +174,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ────────────────────────────────────────────────────────────────
 app.include_router(
-    analysis.router,
-    prefix="/v1/analysis",
-    tags=["Analysis"],
-)
-app.include_router(
-    config.router,
-    prefix="/v1/config",
-    tags=["Config"],
-)
-app.include_router(
-    documents.router,
-    prefix="/v1/documents",
-    tags=["Documents"],
-)
-app.include_router(
     processes.router,
     prefix="/v1/processes",
     tags=["Processes"],
@@ -197,6 +182,21 @@ app.include_router(
     submissions.router,
     prefix="/v1/submissions",
     tags=["Submissions"],
+)
+app.include_router(
+    documents.router,
+    prefix="/v1/documents",
+    tags=["Documents"],
+)
+app.include_router(
+    analysis.router,
+    prefix="/v1/analysis",
+    tags=["Analysis"],
+)
+app.include_router(
+    config.router,
+    prefix="/v1/config",
+    tags=["Config"],
 )
 
 
