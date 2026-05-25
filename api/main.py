@@ -1,6 +1,15 @@
+"""
+Doc-I — Document Intelligence Platform
+API entry point.
+
+All routers registered here. Custom OpenAPI schema forces
+success → message → data field order across all responses.
+"""
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
@@ -48,24 +57,76 @@ app.add_middleware(
 )
 
 
+# ── Custom OpenAPI schema ──────────────────────────────────────────────────
+def custom_openapi():
+    """
+    Overrides FastAPI's default OpenAPI schema generation.
+
+    Forces success → message → data field ordering in all response
+    schemas. Pydantic v2 Generic models do not guarantee field order
+    in the generated OpenAPI spec — this post-processes the schema
+    to reorder properties consistently.
+
+    Cached after first call — only runs once per application lifecycle.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        contact=app.contact,
+        license_info=app.license_info,
+        routes=app.routes,
+    )
+
+    # Force success → message → data order in all response schemas
+    for _, schema in openapi_schema.get("components", {}).get("schemas", {}).items():
+        if "properties" in schema:
+            props = schema["properties"]
+            ordered = {}
+            for key in ["success", "message", "data"]:
+                if key in props:
+                    ordered[key] = props[key]
+            for key, value in props.items():
+                if key not in ordered:
+                    ordered[key] = value
+            schema["properties"] = ordered
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
+
 # ── Custom Swagger UI ──────────────────────────────────────────────────────
 @app.get("/docs", include_in_schema=False)
 async def swagger_ui():
+    """
+    Custom Swagger UI served from unpkg CDN with pinned versions.
+    Pinned versions prevent silent breaking changes.
+    """
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
-        title="Document Intelligence API — Swagger UI",
-        swagger_js_url="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js",
-        swagger_css_url="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css",
+        title="Doc-I API — Swagger UI",
+        swagger_js_url=("https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"),
+        swagger_css_url=("https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css"),
     )
 
 
 # ── Custom ReDoc ───────────────────────────────────────────────────────────
 @app.get("/redoc", include_in_schema=False)
 async def redoc_ui():
+    """
+    Custom ReDoc served from unpkg CDN with pinned version.
+    More readable than Swagger for external API consumers.
+    """
     return get_redoc_html(
         openapi_url="/openapi.json",
         title="Document Intelligence API — ReDoc",
-        redoc_js_url="https://unpkg.com/redoc@2.1.3/bundles/redoc.standalone.js",
+        redoc_js_url=("https://unpkg.com/redoc@2.1.3/bundles/redoc.standalone.js"),
     )
 
 
