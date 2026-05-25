@@ -744,7 +744,7 @@ class TestStep8ConfigAdjustment:
         # Tighten thresholds
         put_response = client.put(
             f"{CONFIG_BASE}/thresholds",
-            json={"auto_above": 99, "manual_below": 95},
+            json={"auto_above": 99, "manual_below": 79},
             headers=api_key_headers,
         )
         assert (
