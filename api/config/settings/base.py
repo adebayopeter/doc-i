@@ -32,6 +32,8 @@ class BaseAppSettings(BaseSettings):
 
     # AI APIs
     ANTHROPIC_API_KEY: str
+    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    CLAUDE_MAX_TOKENS: int = 1500
     AZURE_DOCINT_ENDPOINT: str = ""
     AZURE_DOCINT_KEY: str = ""
 

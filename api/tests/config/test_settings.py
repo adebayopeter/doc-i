@@ -64,3 +64,13 @@ def test_settings_azure_keys_default_to_empty():
     """Azure keys are optional — default to empty string."""
     assert isinstance(settings.AZURE_DOCINT_ENDPOINT, str)
     assert isinstance(settings.AZURE_DOCINT_KEY, str)
+
+
+def test_settings_claude_model_not_empty():
+    assert settings.CLAUDE_MODEL
+    assert "claude" in settings.CLAUDE_MODEL.lower()
+
+
+def test_settings_claude_max_tokens_is_positive():
+    assert settings.CLAUDE_MAX_TOKENS > 0
+    assert isinstance(settings.CLAUDE_MAX_TOKENS, int)

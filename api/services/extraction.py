@@ -164,8 +164,8 @@ def classify_and_extract(
         )
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1500,
+        model=settings.CLAUDE_MODEL,
+        max_tokens=settings.CLAUDE_MAX_TOKENS,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
     )
