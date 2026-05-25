@@ -44,22 +44,30 @@ services:
     restart: unless-stopped
 
   # ── 3. Streamlit demo ──────────────────────────────────────────────────
-#  demo:
-#    build:
-#      context: ./demo
-#      args:
-#        PYTHON_VERSION: ${PYTHON_VERSION}
-#    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
-#    ports:
-#      - "${DEMO_PORT}:8501"
-#    env_file: .env
-#    volumes:
-#      - ./demo:/app
-#    depends_on:
-#      - api
-#    networks:
-#      - internal
-#    restart: unless-stopped
+  demo:
+    build:
+      context: ./demo
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION}
+    command: >
+      streamlit run app.py 
+      --server.port=8501 
+      --server.address=0.0.0.0
+      --server.headless=true
+      --browser.gatherUsageStats=false
+    ports:
+      - "${DEMO_PORT}:8501"
+    env_file: .env
+    environment:
+      - API_BASE_URL=http://api:8012
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ./demo:/app
+    depends_on:
+      - api
+    networks:
+      - internal
+    restart: unless-stopped
 
   # ── 4. PostgreSQL ──────────────────────────────────────────────────────
   postgres:
