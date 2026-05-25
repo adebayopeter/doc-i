@@ -32,8 +32,8 @@ class BaseAppSettings(BaseSettings):
 
     # AI APIs
     ANTHROPIC_API_KEY: str
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
-    CLAUDE_MAX_TOKENS: int = 1500
+    CLAUDE_MODEL: str
+    CLAUDE_MAX_TOKENS: int
     AZURE_DOCINT_ENDPOINT: str = ""
     AZURE_DOCINT_KEY: str = ""
 
@@ -64,6 +64,31 @@ class BaseAppSettings(BaseSettings):
     def validate_secret_key(cls, v: str) -> str:
         if len(v) < 16:
             raise ValueError("SECRET_KEY must be at least 16 characters")
+        return v
+
+    @field_validator("CLAUDE_MODEL")
+    @classmethod
+    def validate_claude_model(cls, v: str) -> str:
+        if not v:
+            raise ValueError(
+                "CLAUDE_MODEL must be set in .env "
+                "e.g. CLAUDE_MODEL=claude-sonnet-4-20250514"
+            )
+        return v
+
+    @field_validator("CLAUDE_MAX_TOKENS")
+    @classmethod
+    def validate_claude_max_tokens(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                "CLAUDE_MAX_TOKENS must be a positive integer "
+                "e.g. CLAUDE_MAX_TOKENS=1500"
+            )
+        if v > 8096:
+            raise ValueError(
+                "CLAUDE_MAX_TOKENS cannot exceed 8096 — "
+                "Claude's maximum output token limit"
+            )
         return v
 
     class Config:

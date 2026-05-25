@@ -53,6 +53,16 @@ class ProdSettings(BaseAppSettings):
                 )
         return v
 
+    @field_validator("CLAUDE_MODEL")
+    @classmethod
+    def validate_claude_model_prod(cls, v: str) -> str:
+        if not v or "claude" not in v.lower():
+            raise ValueError(
+                "CLAUDE_MODEL must be a valid Claude model identifier "
+                "e.g. claude-sonnet-4-20250514"
+            )
+        return v
+
     class Config(BaseAppSettings.Config):
         env_file = None  # no .env file on the server
         # all vars come from system environment
