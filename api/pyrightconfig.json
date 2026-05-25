@@ -5,5 +5,6 @@
   "venv": "venv",
   "include": ["."],
   "extraPaths": ["."],
+  "reportArgumentType": "none",
   "reportGeneralTypeIssues": "none"
 }
