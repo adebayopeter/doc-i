@@ -84,4 +84,6 @@ def client(db_session):
 @pytest.fixture
 def api_key_headers():
     """Valid API key headers for authenticated requests."""
-    return {"X-API-Key": "dev-secret-change-this-before-production"}
+    from config.settings import settings
+
+    return {"X-API-Key": settings.SECRET_KEY}

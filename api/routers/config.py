@@ -20,7 +20,7 @@ from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import ValidationRule
 from schemas.base import error_response, success_response
-from schemas.config import RuleUpdate, ThresholdUpdate
+from schemas.config import RuleUpdate, ThresholdUpdate, ValidationRuleCreate
 from services.decisioning import DEFAULT_THRESHOLDS
 
 logger = get_logger(__name__)
@@ -197,6 +197,72 @@ def list_rules(db: Session = db_dependency):
             "disabled": len(rules) - enabled,
         },
         message="Validation rules retrieved successfully",
+    )
+
+
+@router.post(
+    "/rules",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a validation rule",
+    responses={
+        201: {
+            "description": "Rule created",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Validation rule created successfully",
+                        "data": {
+                            "id": "rule_abc123def456",
+                            "name": "Passport not expired",
+                            "rule_type": "logical",
+                            "field": "Expiry Date",
+                            "check": "not_expired",
+                            "pattern": None,
+                            "severity": "error",
+                            "is_enabled": True,
+                            "created_at": "2025-05-20T10:00:00",
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+def create_rule(
+    payload: ValidationRuleCreate,
+    db: Session = db_dependency,
+):
+    # Check for duplicate name
+    existing = (
+        db.query(ValidationRule).filter(ValidationRule.name.ilike(payload.name)).first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response(
+                f"A rule named '{payload.name}' already exists",
+                data={"existing_id": existing.id},
+            ),
+        )
+
+    rule = ValidationRule(
+        name=payload.name,
+        rule_type=payload.rule_type,
+        field=payload.field,
+        severity=payload.severity,
+        pattern=payload.pattern,
+        check=payload.check,
+        is_enabled=True,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+
+    logger.info(f"Validation rule created: {rule.id} ({rule.name})")
+    return success_response(
+        data=_build_rule_out(rule),
+        message="Validation rule created successfully",
     )
 
 
@@ -521,12 +587,12 @@ def update_thresholds(payload: ThresholdUpdate):
             "manual_below": payload.manual_below,
             "previous": previous,
             "description": {
-                "auto": (f"confidence ≥ {payload.auto_above}% → auto-process"),
+                "auto": f"confidence ≥ {payload.auto_above}% → auto-process",
                 "review": (
                     f"{payload.manual_below}% ≤ confidence "
                     f"< {payload.auto_above}% → flag for review"
                 ),
-                "manual": (f"confidence < {payload.manual_below}% → manual input"),
+                "manual": f"confidence < {payload.manual_below}% → manual input",
             },
         },
         message="Thresholds updated successfully",

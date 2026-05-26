@@ -932,6 +932,122 @@ elif page_name == "Config":
 
     # ── Tab 1: Validation rules ────────────────────────────────────────
     with tab1:
+        # ── Create new rule ────────────────────────────────────────────
+        with st.expander("➕ Create New Validation Rule", expanded=False):
+            with st.form("create_rule"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    rule_name = st.text_input(
+                        "Rule Name *",
+                        placeholder="e.g. NIN must be 11 digits",
+                    )
+                    rule_field = st.text_input(
+                        "Field *",
+                        placeholder="e.g. NIN",
+                        help="The document field this rule applies to",
+                    )
+                    rule_type = st.selectbox(
+                        "Rule Type *",
+                        ["required", "format", "logical", "cross_doc"],
+                        help=(
+                            "required — field must be present\n"
+                            "format — field must match a regex pattern\n"
+                            "logical — date/age/expiry check\n"
+                            "cross_doc — value must match across documents"
+                        ),
+                    )
+                with col2:
+                    rule_severity = st.selectbox(
+                        "Severity",
+                        ["error", "warning"],
+                        help=(
+                            "error — failure blocks auto-processing\n"
+                            "warning — flagged but does not block"
+                        ),
+                    )
+                    rule_pattern = st.text_input(
+                        "Pattern (format rules only)",
+                        placeholder=r"e.g. ^\d{11}$",
+                        help="Regex pattern the field value must match",
+                    )
+                    rule_check = st.selectbox(
+                        "Check (logical rules only)",
+                        ["", "not_future", "min_age_18", "not_expired"],
+                        help="Which logical check to run on the field value",
+                    )
+
+                # Show contextual help based on rule type
+                if rule_type == "required":
+                    st.info(
+                        "💡 Required rule — the field must be present and "
+                        "not null. No pattern or check needed."
+                    )
+                elif rule_type == "format":
+                    st.info(
+                        "💡 Format rule — field value must match the regex "
+                        "pattern. Example: `^\\d{11}$` for an 11-digit NIN."
+                    )
+                elif rule_type == "logical":
+                    st.info(
+                        "💡 Logical rule — runs a date or age check. "
+                        "Select a check from the dropdown above."
+                    )
+                elif rule_type == "cross_doc":
+                    st.info(
+                        "💡 Cross-document rule — checks that this field "
+                        "has the same value across all classified documents. "
+                        "No pattern or check needed."
+                    )
+
+                rule_submitted = st.form_submit_button(
+                    "Create Rule", type="primary", use_container_width=True
+                )
+
+            if rule_submitted:
+                if not rule_name:
+                    st.error("Rule name is required.")
+                elif not rule_field:
+                    st.error("Field is required.")
+                elif rule_type == "format" and not rule_pattern:
+                    st.error(
+                        "Pattern is required for format rules. "
+                        r"Example: ^\d{11}$ for an 11-digit number."
+                    )
+                elif rule_type == "logical" and not rule_check:
+                    st.error(
+                        "Check is required for logical rules. "
+                        "Select one from the dropdown."
+                    )
+                else:
+                    payload = {
+                        "name": rule_name,
+                        "rule_type": rule_type,
+                        "field": rule_field,
+                        "severity": rule_severity,
+                        "pattern": rule_pattern or None,
+                        "check": rule_check or None,
+                    }
+                    import requests as req
+
+                    response = req.post(
+                        f"{API_BASE}/v1/config/rules",
+                        headers=HEADERS,
+                        json=payload,
+                        timeout=10,
+                    )
+                    result_data = response.json()
+                    if result_data.get("success"):
+                        st.success(
+                            f"✅ Rule **{rule_name}** created successfully."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(
+                            f"❌ {result_data.get('message', 'Failed to create rule')}"
+                        )
+
+        st.divider()
+
         result = api_get("/v1/config/rules")
         if not result.get("success"):
             st.error(result.get("message"))

@@ -69,6 +69,15 @@ class ThresholdUpdate(BaseModel):
     }
 
 
+class ValidationRuleCreate(BaseModel):
+    name: str = Field(..., min_length=3, max_length=200)
+    rule_type: str = Field(..., pattern="^(required|format|logical|cross_doc)$")
+    field: str = Field(..., min_length=1, max_length=100)
+    severity: str = Field(default="error", pattern="^(error|warning)$")
+    pattern: Optional[str] = Field(default=None, max_length=500)
+    check: Optional[str] = Field(default=None, max_length=100)
+
+
 # ── Response schemas ───────────────────────────────────────────────────────
 class RuleOut(BaseModel):
     id: str
