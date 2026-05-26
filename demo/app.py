@@ -317,7 +317,7 @@ if page_name == "Processes":
         else:
             for proc in processes:
                 with st.container(border=True):
-                    col1, col2, col3 = st.columns([5, 2, 2])
+                    col1, col2, col3, col4 = st.columns([4, 2, 2, 2])
                     with col1:
                         st.markdown(f"**{proc['name']}**")
                         if proc.get("description"):
@@ -348,6 +348,52 @@ if page_name == "Processes":
                                 "process_id"
                             ]
                             st.session_state.active_page = "Submissions"
+                            st.rerun()
+                    with col4:
+                        if st.button(
+                                "🗑️ Deactivate",
+                                key=f"del_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = True
+                            st.rerun()
+
+                # ── Deactivate confirmation ────────────────────────────────
+                if st.session_state.get(f"confirm_delete_{proc['process_id']}"):
+                    st.warning(
+                        f"⚠️ Deactivate **{proc['name']}**? "
+                        f"It will be hidden from all lists. "
+                        f"Existing submissions are unaffected."
+                    )
+                    col_yes, col_no = st.columns(2)
+                    with col_yes:
+                        if st.button(
+                                "Yes, deactivate",
+                                key=f"confirm_yes_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            result = api_delete(
+                                f"/v1/processes/{proc['process_id']}"
+                            )
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = False
+                            if result.get("success"):
+                                st.success(f"✅ {proc['name']} deactivated.")
+                            else:
+                                st.error(result.get("message", "Failed"))
+                            st.rerun()
+                    with col_no:
+                        if st.button(
+                                "Cancel",
+                                key=f"confirm_no_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = False
                             st.rerun()
 
                 # ── Inline edit form ───────────────────────────────────────

@@ -122,7 +122,7 @@ class ProcessUpdate(BaseModel):
         default=None,
         max_length=100,
     )
-    documents: Optional[List["ProcessDocumentCreate"]] = Field(
+    documents: Optional[List["ProcessDocumentIn"]] = Field(
         default=None,
         description=(
             "If provided, replaces the entire document checklist. "
