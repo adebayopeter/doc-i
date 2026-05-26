@@ -22,6 +22,7 @@ from schemas.process import (
     ProcessDocumentOut,
     ProcessListData,
     ProcessSummary,
+    ProcessUpdate,
 )
 
 logger = get_logger(__name__)
@@ -460,6 +461,106 @@ def get_process(
     return success_response(
         message="Process retrieved successfully",
         data=_build_process_detail(process),
+    )
+
+
+# ── UPDATE /v1/processes/{process_id} ────────────────────────────────────
+@router.patch(
+    "/{process_id}",
+    summary="Update a process",
+    description=(
+        "Update process metadata or replace the document checklist. "
+        "If documents are provided, the entire checklist is replaced. "
+        "Cannot update a deactivated process."
+    ),
+    responses={
+        200: {
+            "description": "Process updated",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process updated successfully",
+                        "data": {
+                            "process_id": "proc_1a2b3c4d5e6f",
+                            "name": "RSA Mortgage Application",
+                            "document_count": 6,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404,
+        422: _422,
+    },
+)
+def update_process(
+    process_id: str,
+    payload: ProcessUpdate,
+    db: Session = db_dependency,
+):
+    process = _get_process_or_404(process_id, db)
+
+    if not process.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response("Cannot update a deactivated process"),
+        )
+
+    # Check name uniqueness if name is being changed
+    if payload.name and payload.name != process.name:
+        conflict = (
+            db.query(Process)
+            .filter(
+                Process.name == payload.name,
+                Process.id != process_id,
+                Process.is_active.is_(True),
+            )
+            .first()
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=error_response(
+                    f"A process named '{payload.name}' already exists",
+                    data={"existing_id": conflict.id},
+                ),
+            )
+        process.name = payload.name
+
+    if payload.description is not None:
+        process.description = payload.description
+    if payload.color_var is not None:
+        process.color_var = payload.color_var
+    if payload.icon is not None:
+        process.icon = payload.icon
+
+    # Replace document checklist if provided
+    if payload.documents is not None:
+        # Delete existing documents
+        db.query(ProcessDocument).filter(
+            ProcessDocument.process_id == process_id
+        ).delete(synchronize_session=False)
+
+        # Add new documents
+        for order, doc in enumerate(payload.documents, start=1):
+            db.add(
+                ProcessDocument(
+                    process_id=process_id,
+                    name=doc.name,
+                    category=doc.category,
+                    is_required=doc.is_required,
+                    sort_order=order,
+                )
+            )
+
+    db.commit()
+    db.refresh(process)
+
+    logger.info(f"Process updated: {process_id} ({process.name})")
+    return success_response(
+        data=_build_process_detail(process),
+        message="Process updated successfully",
     )
 
 

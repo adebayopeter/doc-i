@@ -101,6 +101,37 @@ class ProcessCreate(BaseModel):
     }
 
 
+class ProcessUpdate(BaseModel):
+    """Partial update — all fields optional."""
+
+    name: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=200,
+        examples=["RSA Mortgage Application"],
+    )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=500,
+    )
+    color_var: Optional[str] = Field(
+        default=None,
+        max_length=50,
+    )
+    icon: Optional[str] = Field(
+        default=None,
+        max_length=100,
+    )
+    documents: Optional[List["ProcessDocumentCreate"]] = Field(
+        default=None,
+        description=(
+            "If provided, replaces the entire document checklist. "
+            "Must contain at least one document."
+        ),
+        min_length=1,
+    )
+
+
 # ── Response schemas ───────────────────────────────────────────────────────
 class ProcessDocumentOut(BaseModel):
     """One document in the process checklist — returned in responses."""
