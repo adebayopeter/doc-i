@@ -14,6 +14,7 @@ Endpoints:
 """
 
 import uuid
+from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -84,6 +85,21 @@ _404_submission = {
                 "message": "Submission not found",
                 "data": None,
             }
+        }
+    },
+}
+
+_422_submission = {
+    "description": "Submission is in a terminal state",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": (
+                    "Cannot upload documents to a submission " "with status 'complete'"
+                ),
+                "data": None,
+            },
         }
     },
 }
@@ -172,6 +188,25 @@ def _build_document_out(document: SubmissionDocument) -> dict:
     }
 
 
+def _get_file_bytes_b64(document_id: str, db: Session) -> str | None:
+    """Fetch file from MinIO and return as base64 for Celery task."""
+    import base64
+
+    doc = (
+        db.query(SubmissionDocument)
+        .filter(SubmissionDocument.id == document_id)
+        .first()
+    )
+    if not doc:
+        return None
+    try:
+        file_bytes = get_file(doc.storage_path)
+        return base64.b64encode(file_bytes).decode("utf-8")
+    except Exception as e:
+        logger.error(f"Could not fetch file for queuing: {e}")
+        return None
+
+
 def _store_file_locally(
     file_bytes: bytes,
     filename: str,
@@ -256,21 +291,7 @@ def _store_file_locally(
             },
         },
         404: _404_submission,
-        422: {
-            "description": "Submission is in a terminal state",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "success": False,
-                        "message": (
-                            "Cannot upload documents to a submission "
-                            "with status 'complete'"
-                        ),
-                        "data": None,
-                    }
-                }
-            },
-        },
+        422: _422_submission,
     },
 )
 async def upload_document(
@@ -555,21 +576,7 @@ def get_document(
             },
         },
         404: _404_document,
-        422: {
-            "description": "Cannot remove from a terminal submission",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "success": False,
-                        "message": (
-                            "Cannot remove documents from a submission "
-                            "with status 'complete'"
-                        ),
-                        "data": None,
-                    }
-                }
-            },
-        },
+        422: _422_submission,
     },
 )
 def delete_document(
@@ -613,4 +620,163 @@ def delete_document(
             "submission_id": submission_id,
         },
         message="Document removed successfully",
+    )
+
+
+@router.post(
+    "/submissions/{submission_id}/upload-bulk",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Upload multiple documents",
+    description=(
+        "Upload up to 10 documents in a single request. "
+        "Each file is stored and queued for classification independently. "
+        "Returns a list of document IDs and their upload status."
+    ),
+    responses={
+        202: {
+            "description": "All files accepted for processing",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "3 documents uploaded successfully",
+                        "data": {
+                            "submission_id": "sub_1a2b3c4d5e6f",
+                            "uploaded": [
+                                {
+                                    "document_id": "doc_1a2b3c4d5e6f",
+                                    "filename": "nin_slip.pdf",
+                                    "status": "uploaded",
+                                },
+                                {
+                                    "document_id": "doc_2b3c4d5e6f7a",
+                                    "filename": "bank_statement.pdf",
+                                    "status": "uploaded",
+                                },
+                            ],
+                            "failed": [],
+                            "total_uploaded": 2,
+                            "total_failed": 0,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_submission,
+        422: _422_submission,
+    },
+)
+def upload_bulk_documents(
+    submission_id: str,
+    files: List[UploadFile] = File(...),
+    db: Session = db_dependency,
+):
+    submission = _get_submission_or_404(submission_id, db)
+
+    if submission.status == "complete":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response("Cannot upload to a completed submission"),
+        )
+    if submission.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response("Cannot upload to a rejected submission"),
+        )
+
+    if len(files) > 10:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response("Maximum 10 files per bulk upload request"),
+        )
+
+    uploaded = []
+    failed = []
+
+    for file in files:
+        try:
+            # Validate file
+            if file.content_type not in ALLOWED_MIME_TYPES:
+                failed.append(
+                    {
+                        "filename": file.filename,
+                        "reason": f"Unsupported file type: {file.content_type}",
+                    }
+                )
+                continue
+
+            contents = file.file.read()
+            if len(contents) == 0:
+                failed.append({"filename": file.filename, "reason": "Empty file"})
+                continue
+
+            # Store in MinIO
+            storage_path = upload_file(
+                file_bytes=contents,
+                filename=file.filename,
+                content_type=file.content_type,
+                submission_id=submission_id,
+            )
+
+            # Create DB record
+            doc = SubmissionDocument(
+                submission_id=submission_id,
+                filename=file.filename,
+                storage_path=storage_path,
+                mime_type=file.content_type,
+                status="uploaded",
+            )
+            db.add(doc)
+            db.flush()
+
+            uploaded.append(
+                {
+                    "document_id": doc.id,
+                    "filename": file.filename,
+                    "status": "uploaded",
+                }
+            )
+
+            logger.info(
+                f"Bulk upload: {doc.id} ({file.filename}) "
+                f"for submission {submission_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Bulk upload failed for {file.filename}: {e}")
+            failed.append({"filename": file.filename, "reason": str(e)})
+
+    # Move submission to in_progress if any uploaded
+    if uploaded and submission.status == "open":
+        submission.status = "in_progress"
+
+    db.commit()
+
+    # Queue classification for all uploaded docs
+    for doc_info in uploaded:
+        file_bytes_b64 = _get_file_bytes_b64(doc_info["document_id"], db)
+        if file_bytes_b64:
+            process_document.delay(
+                doc_info["document_id"],
+                submission_id,
+                file_bytes_b64,
+            )
+
+    total_uploaded = len(uploaded)
+    total_failed = len(failed)
+
+    logger.info(
+        f"Bulk upload complete: {total_uploaded} uploaded, "
+        f"{total_failed} failed for submission {submission_id}"
+    )
+
+    return success_response(
+        data={
+            "submission_id": submission_id,
+            "uploaded": uploaded,
+            "failed": failed,
+            "total_uploaded": total_uploaded,
+            "total_failed": total_failed,
+        },
+        message=f"{total_uploaded} document(s) uploaded successfully",
     )

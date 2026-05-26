@@ -725,51 +725,116 @@ elif page_name == "Documents":
     sub_data = sub_detail.get("data", {})
     status = sub_data.get("status", "open")
 
-    if status in {"complete", "rejected"}:
-        st.warning(
-            f"This submission is **{status}** — no more documents can be uploaded."
-        )
-    else:
-        uploaded_file = st.file_uploader(
-            "Upload a document",
-            type=["pdf", "png", "jpg", "jpeg", "webp", "tiff"],
-            help="PDF, PNG, JPG, WEBP or TIFF — max 20MB",
+    if status not in {"complete", "rejected"}:
+
+        upload_mode = st.radio(
+            "Upload mode",
+            ["Single document", "Multiple documents"],
+            horizontal=True,
         )
 
-        if uploaded_file:
-            col1, col2 = st.columns([3, 1])
-            with col1:
+        if upload_mode == "Single document":
+            uploaded_file = st.file_uploader(
+                "Upload a document",
+                type=["pdf", "png", "jpg", "jpeg", "webp", "tiff"],
+                help="PDF, PNG, JPG, WEBP or TIFF — max 200MB",
+            )
+            if uploaded_file:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.caption(
+                        f"**{uploaded_file.name}** "
+                        f"({uploaded_file.size / 1024:.1f} KB)"
+                    )
+                with col2:
+                    if st.button(
+                            "Upload & Classify",
+                            type="primary",
+                            use_container_width=True,
+                    ):
+                        with st.spinner("Uploading..."):
+                            result = api_post(
+                                f"/v1/documents/submissions/{selected_sid}/upload",
+                                files={
+                                    "file": (
+                                        uploaded_file.name,
+                                        uploaded_file.getvalue(),
+                                        uploaded_file.type,
+                                    )
+                                },
+                            )
+                        if result.get("success"):
+                            st.success(
+                                f"✅ Uploaded: `{result['data']['document_id']}` — "
+                                f"classification running..."
+                            )
+                            st.rerun()
+                        else:
+                            st.error(
+                                f"❌ {result.get('message', 'Upload failed')}"
+                            )
+
+        else:
+            uploaded_files = st.file_uploader(
+                "Upload multiple documents (max 10)",
+                type=["pdf", "png", "jpg", "jpeg", "webp", "tiff"],
+                accept_multiple_files=True,
+                help="Select up to 10 files at once",
+            )
+            if uploaded_files:
                 st.caption(
-                    f"**{uploaded_file.name}** "
-                    f"({uploaded_file.size / 1024:.1f} KB)"
+                    f"**{len(uploaded_files)} file(s) selected:** "
+                    + ", ".join(f.name for f in uploaded_files)
                 )
-            with col2:
-                if st.button(
-                    "Upload & Classify",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    with st.spinner("Uploading and queuing classification..."):
-                        result = api_post(
-                            f"/v1/documents/submissions/{selected_sid}/upload",
-                            files={
-                                "file": (
-                                    uploaded_file.name,
-                                    uploaded_file.getvalue(),
-                                    uploaded_file.type,
+
+                if len(uploaded_files) > 10:
+                    st.error("Maximum 10 files per upload. Please remove some files.")
+                else:
+                    if st.button(
+                            f"Upload & Classify All {len(uploaded_files)} Files",
+                            type="primary",
+                            use_container_width=True,
+                    ):
+                        with st.spinner(
+                                f"Uploading {len(uploaded_files)} documents..."
+                        ):
+                            import requests as req
+
+                            files_payload = [
+                                (
+                                    "files",
+                                    (f.name, f.getvalue(), f.type),
                                 )
-                            },
-                        )
-                    if result.get("success"):
-                        st.success(
-                            f"✅ Uploaded: `{result['data']['document_id']}` — "
-                            f"classification running..."
-                        )
-                        st.rerun()
-                    else:
-                        st.error(
-                            f"❌ {result.get('message', 'Upload failed')}"
-                        )
+                                for f in uploaded_files
+                            ]
+                            response = req.post(
+                                f"/v1/documents/submissions/{selected_sid}/upload-bulk",
+                                headers={
+                                    k: v
+                                    for k, v in HEADERS.items()
+                                    if k != "Content-Type"
+                                },
+                                files=files_payload,
+                                timeout=120,
+                            )
+                            result = response.json()
+
+                        if result.get("success"):
+                            data = result["data"]
+                            st.success(
+                                f"✅ {data['total_uploaded']} document(s) uploaded "
+                                f"— classification running..."
+                            )
+                            if data["failed"]:
+                                for fail in data["failed"]:
+                                    st.warning(
+                                        f"⚠️ {fail['filename']}: {fail['reason']}"
+                                    )
+                            st.rerun()
+                        else:
+                            st.error(
+                                f"❌ {result.get('message', 'Bulk upload failed')}"
+                            )
 
     st.divider()
 
@@ -889,6 +954,22 @@ elif page_name == "Documents":
                                     f"show_doc_{doc['document_id']}"
                                 ] = False
                                 st.rerun()
+
+        # Auto-refresh while any document is still being processed
+        pending = sum(
+            1 for doc in documents
+            if doc["status"] in {"uploaded", "processing"}
+        )
+
+        if pending > 0:
+            st.info(
+                f"⏳ {pending} document(s) still being classified "
+                f"— refreshing in 5 seconds..."
+            )
+            time.sleep(5)
+            st.rerun()
+        elif total > 0 and classified == total:
+            st.success(f"✅ All {classified} documents classified.")
 
 
 # ══════════════════════════════════════════════════════════════════════
