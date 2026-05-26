@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -55,6 +56,12 @@ class Process(Base):
         order_by="ProcessDocument.sort_order",
     )
     submissions = relationship("Submission", back_populates="process")
+    extraction_fields = relationship(
+        "ProcessExtractionField",
+        back_populates="process",
+        cascade="all, delete-orphan",
+        order_by="ProcessExtractionField.sort_order",
+    )
 
     def __repr__(self):
         return f"<Process id={self.id} name={self.name}>"
@@ -83,6 +90,38 @@ class ProcessDocument(Base):
 
     def __repr__(self):
         return f"<ProcessDocument id={self.id} name={self.name}>"
+
+
+class ProcessExtractionField(Base):
+    """
+    Per-process field configuration for AI extraction and decisioning.
+
+    If a process has no active extraction fields, classification
+    is disabled — documents are stored but not processed by AI.
+    """
+
+    __tablename__ = "process_extraction_fields"
+
+    id = Column(String, primary_key=True, default=lambda: _gen_id("pef"))
+    process_id = Column(
+        String,
+        ForeignKey("processes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    include_in_decision = Column(Boolean, default=True, nullable=False)
+    null_is_manual = Column(Boolean, default=False, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    process = relationship("Process", back_populates="extraction_fields")
+
+    __table_args__ = (
+        UniqueConstraint("process_id", "name", name="uq_process_field_name"),
+    )
 
 
 # 3. Submission

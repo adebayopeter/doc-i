@@ -14,7 +14,15 @@ from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
 from config.settings import settings
-from routers import analysis, categories, config, documents, processes, submissions
+from routers import (
+    analysis,
+    categories,
+    config,
+    documents,
+    extraction_fields,
+    processes,
+    submissions,
+)
 
 logger = get_logger(__name__)
 
@@ -207,6 +215,12 @@ app.include_router(
     categories.router,
     prefix="/v1/config/categories",
     tags=["Config"],
+)
+
+app.include_router(
+    extraction_fields.router,
+    prefix="/v1/processes",
+    tags=["Processes"],
 )
 
 

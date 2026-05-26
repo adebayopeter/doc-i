@@ -15,49 +15,62 @@ from config.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ── System prompt ──────────────────────────────────────────────────────────
-# Instructs Claude on the response format and Nigerian document context.
-# Nigerian-specific documents are called out explicitly so Claude
-# handles NIN slips, BVN letters, CAC certificates correctly.
 
-_SYSTEM_PROMPT = """
+# ── Extraction prompt ──────────────────────────────────────────────────────────
+def _build_system_prompt(
+    process_name: str,
+    checklist: list,
+    extraction_fields: list,
+) -> str:
+    """
+    Builds the Claude system prompt dynamically from configured fields.
+
+    Args:
+        process_name:      Name of the process e.g. RSA Mortgage Application
+        checklist:         List of dicts with id, name, category
+        extraction_fields: List of dicts with at least {"name": str}
+
+    Returns:
+        System prompt string for Claude.
+    """
+    checklist_str = "\n".join(
+        f"{d['id']}. {d['name']} ({d['category']})" for d in checklist
+    )
+
+    # Build only the fields configured for this process
+    fields_template = "\n".join(
+        f'            "{f["name"]}":             '
+        f'{{"value": "<string or null>", "confidence": <0-100>}},'
+        for f in extraction_fields
+    )
+
+    return f"""
     You are a document analyst for a Nigerian document processing platform.
     You receive document text or images and must classify and extract fields.
+
+    Process: {process_name}
+
+    Required document checklist: {checklist_str}
 
     Respond ONLY with valid JSON — no markdown, no backticks, no explanation.
 
     Return this exact structure:
-    {
+    {{
         "documentType": "<matched name from checklist or 'Unknown'>",
         "matchedDocId": <integer id from checklist or null>,
         "category": "<category string>",
         "confidence": <integer 0-100>,
         "summary": "<2 sentence summary of the document>",
-        "extractedFields": {
-            "Full Name":             {"value": "<string or null>", "confidence": <0-100>},
-            "Date of Birth":         {"value": "<YYYY-MM-DD or null>", "confidence": <0-100>},
-            "ID / Reference Number": {"value": "<string or null>", "confidence": <0-100>},
-            "NIN":                   {"value": "<11-digit string or null>", "confidence": <0-100>},
-            "BVN":                   {"value": "<11-digit string or null>", "confidence": <0-100>},
-            "Address":               {"value": "<string or null>", "confidence": <0-100>},
-            "Expiry Date":           {"value": "<YYYY-MM-DD or null>", "confidence": <0-100>},
-            "Issuing Authority":     {"value": "<string or null>", "confidence": <0-100>},
-            "Employer Name":         {"value": "<string or null>", "confidence": <0-100>},
-            "Annual Income":         {"value": "<string or null>", "confidence": <0-100>},
-            "Account Number":        {"value": "<10-digit string or null>", "confidence": <0-100>},
-            "Bank Name":             {"value": "<string or null>", "confidence": <0-100>},
-            "Sort Code":             {"value": "<string or null>", "confidence": <0-100>},
-            "Policy Number":         {"value": "<string or null>", "confidence": <0-100>},
-            "Property Address":      {"value": "<string or null>", "confidence": <0-100>},
-            "Property Value":        {"value": "<string or null>", "confidence": <0-100>}
-        },
+        "extractedFields": {{
+        {fields_template}
+        }},
         "flags": [
-            {
+            {{
                 "type": "ok|warn|err",
                 "message": "<message>"
-            }
+            }}
         ]
-    }
+    }}
 
     Rules:
     - Set value to null for any field not found in the document
@@ -75,48 +88,60 @@ _SYSTEM_PROMPT = """
 def classify_and_extract(
     process_name: str,
     document_checklist: list,
+    extraction_fields: list,
     ocr_text: str = "",
     file_bytes: bytes = b"",
     mime_type: str = "",
 ) -> dict:
     """
-    Classify a document and extract structured fields using Claude.
-
-    Mode A — text mode (when ocr_text is provided):
-        Cheaper and faster. Azure DocInt pre-extracted the text.
-        Claude reads the text and extracts fields.
-
-    Mode B — vision mode (when file_bytes and mime_type are provided):
-        Used when Azure DocInt is not configured.
-        Claude reads the raw image or PDF directly.
+    Classify a document and extract configured fields using Claude.
 
     Args:
-        process_name:       Name of the process e.g. "RSA Mortgage"
-        document_checklist: List of {"id": int, "name": str, "category": str}
-        ocr_text:           Pre-extracted text from Azure DocInt (optional)
-        file_bytes:         Raw file bytes for vision mode (optional)
-        mime_type:          MIME type for vision mode (optional)
+        process_name:       Name of the process
+        document_checklist: List of dicts — id, name, category
+        extraction_fields:  List of dicts — must have at least {"name": str}
+                            Must not be empty — caller is responsible for
+                            checking this before calling.
+        ocr_text:           Raw text from Azure DocInt (text mode)
+        file_bytes:         Raw file bytes (vision mode fallback)
+        mime_type:          MIME type of the file (vision mode fallback)
 
     Returns:
-        Dict with documentType, matchedDocId, confidence, extractedFields,
-        flags, and summary.
+        Dict with documentType, matchedDocId, confidence,
+        extractedFields, flags, summary.
 
     Raises:
-        ValueError: If neither ocr_text nor file_bytes+mime_type provided
-        Exception:  If Claude API call fails
+        ValueError: If extraction_fields is empty or no content provided.
     """
     import anthropic
 
     from config.settings import settings
 
+    if not extraction_fields:
+        raise ValueError(
+            "extraction_fields is empty — extraction is disabled for this "
+            "process. Configure extraction fields before uploading documents."
+        )
+
+    if not ocr_text and not (file_bytes and mime_type):
+        raise ValueError(
+            "Either ocr_text or both file_bytes and mime_type must be provided"
+        )
+
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    system_prompt = _build_system_prompt(
+        process_name=process_name,
+        checklist=document_checklist,
+        extraction_fields=extraction_fields,
+    )
 
     checklist_str = "\n".join(
         f"{d['id']}. {d['name']} ({d['category']})" for d in document_checklist
     )
 
     if ocr_text:
-        # ── Mode A: text mode ──────────────────────────────────────────────
+        # ── Mode A: text mode — Azure extracted text  ──────────────────────────────────────────────
         user_content = [
             {
                 "type": "text",
@@ -129,11 +154,13 @@ def classify_and_extract(
         ]
         logger.debug(
             f"Claude extraction — text mode "
-            f"({len(ocr_text)} chars, {len(document_checklist)} checklist items)"
+            f"({len(ocr_text)} chars, "
+            f"{len(document_checklist)} checklist items), "
+            f"{len(extraction_fields)} fields)"
         )
 
-    elif file_bytes and mime_type:
-        # ── Mode B: vision mode ────────────────────────────────────────────
+    else:
+        # ── Mode B: vision mode — raw file sent to Claude ──────────────────
         import base64
 
         doc_type = "document" if mime_type == "application/pdf" else "image"
@@ -157,16 +184,13 @@ def classify_and_extract(
         logger.debug(
             f"Claude extraction — vision mode "
             f"({len(file_bytes)} bytes, {mime_type})"
-        )
-    else:
-        raise ValueError(
-            "Either ocr_text or both file_bytes and mime_type must be provided"
+            f"{len(extraction_fields)} fields)"
         )
 
     response = client.messages.create(
         model=settings.CLAUDE_MODEL,
         max_tokens=settings.CLAUDE_MAX_TOKENS,
-        system=_SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_content}],
     )
 

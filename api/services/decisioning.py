@@ -27,6 +27,7 @@ def compute_decision(
     unified_record: Dict[str, Any],
     validation_results: List[Dict],
     thresholds: Dict = None,
+    field_configs: Dict = None,
 ) -> Dict[str, Any]:
     """
     Compute the routing decision for a submission.
@@ -35,6 +36,16 @@ def compute_decision(
         unified_record:      Output of aggregation.build_unified_record()
         validation_results:  Output of validation.run_rules()
         thresholds:          Optional custom thresholds dict
+        field_configs:       Optional per-field config dict keyed by field name:
+                             {
+                                 "Full Name": {
+                                     "include_in_decision": True,
+                                     "null_is_manual": True,
+                                 }
+                             }
+                             If None — all fields included, null fields skipped.
+                             If provided — only configured fields are evaluated,
+                             and null_is_manual is applied per field.
 
     Returns:
         {
@@ -51,10 +62,33 @@ def compute_decision(
 
     # ── Per-field decisions ────────────────────────────────────────────────
     field_decisions = []
-    for field, data in unified_record.items():
-        conf = data.get("bestConfidence", 0)
 
-        if conf >= high:
+    for field, data in unified_record.items():
+        # If field_configs provided, only evaluate configured fields
+        if field_configs is not None:
+            if field not in field_configs:
+                continue
+            cfg = field_configs[field]
+            if not cfg.get("include_in_decision", True):
+                continue
+        else:
+            cfg = {}
+
+        conf = data.get("bestConfidence", 0)
+        is_null = data.get("isNull", False)
+        has_conflict = data.get("hasConflict", False)
+
+        # Apply null handling per field config
+        if is_null:
+            if cfg.get("null_is_manual", False):
+                # This field is required — missing value routes to manual
+                decision = "manual"
+            else:
+                # Not required — skip entirely, don't affect routing
+                continue
+        elif has_conflict:
+            decision = "review"
+        elif conf >= high:
             decision = "auto"
         elif conf >= low:
             decision = "review"
@@ -67,8 +101,8 @@ def compute_decision(
                 "value": data.get("bestValue"),
                 "confidence": conf,
                 "decision": decision,
-                "hasConflict": data.get("hasConflict", False),
-                "isMissing": data.get("isNull", True),
+                "hasConflict": has_conflict,
+                "isMissing": is_null,
             }
         )
 

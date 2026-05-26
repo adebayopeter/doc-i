@@ -1,15 +1,10 @@
 """
-Celery tasks — async document processing pipeline.
+Celery worker tasks.
 
-Pipeline per document:
-  1. Load file bytes from MinIO
-  2. Extract raw text via Azure DocInt (OCR) — optional
-  3. Classify + extract fields via Claude AI
-  4. Persist results to PostgreSQL
-  5. Update submission status
-
-The upload endpoint returns 202 immediately.
-This task runs in the background Celery worker container.
+process_document — the only task.
+Picks up a document_id from the Redis queue,
+runs OCR via Azure DocInt, then classification via Claude,
+and saves results back to PostgreSQL.
 """
 
 from celery import Celery
@@ -25,9 +20,10 @@ celery_app = Celery(
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
-    result_expires=3600,
-    worker_prefetch_multiplier=1,  # process one task at a time per worker
-    task_acks_late=True,  # ack after completion — safer on failures
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    broker_connection_retry_on_startup=True,
 )
 
 
@@ -46,6 +42,14 @@ def process_document(
     """
     Main processing task — runs in the Celery worker.
 
+    Pipeline:
+      1. Load document and mark as processing
+      2. Store file in MinIO
+      3. OCR via Azure DocInt (extract raw text)
+      4. Load process extraction fields — abort if none configured
+      5. Classify + extract via Claude using configured fields only
+      6. Persist results to DB
+
     Args:
         document_id:    SubmissionDocument.id to update
         submission_id:  Parent Submission.id
@@ -54,13 +58,19 @@ def process_document(
     Returns:
         Dict with status and documentType on success.
 
-    The task retries up to 3 times with 30s delay on any exception.
-    On permanent failure, document status is set to 'failed'.
+    Raises:
+        Retries up to 3 times on any exception with 30s delay.
+        On permanent failure, document status is set to 'failed'.
     """
     import base64
 
     from config.logging import get_logger
-    from db.models import Process, Submission, SubmissionDocument
+    from db.models import (
+        Process,
+        ProcessExtractionField,
+        Submission,
+        SubmissionDocument,
+    )
     from db.session import SessionLocal
     from services.extraction import classify_and_extract
     from services.ocr import extract_text
@@ -70,7 +80,7 @@ def process_document(
     db = SessionLocal()
 
     try:
-        # ── Load document record ───────────────────────────────────────────
+        # ── 1. Load document record ───────────────────────────────────────────
         doc = (
             db.query(SubmissionDocument)
             .filter(SubmissionDocument.id == document_id)
@@ -85,10 +95,10 @@ def process_document(
         db.commit()
         logger.info(f"Processing document: {document_id} ({doc.filename})")
 
-        # ── Decode file bytes ──────────────────────────────────────────────
+        # ── 2. Decode file bytes ──────────────────────────────────────────────
         file_bytes = base64.b64decode(file_bytes_b64)
 
-        # ── Store file in MinIO ────────────────────────────────────────────
+        # ── 3. Store file in MinIO ────────────────────────────────────────────
         try:
             storage_path = upload_file(
                 file_bytes=file_bytes,
@@ -102,13 +112,13 @@ def process_document(
             logger.warning(f"MinIO upload failed for {document_id}: {e}")
             # Continue processing even if storage fails
 
-        # ── Step 1: OCR — extract raw text via Azure DocInt ───────────────
+        # ── 4. OCR — extract raw text via Azure DocInt ───────────────
         ocr_text = extract_text(
             file_bytes=file_bytes,
             mime_type=doc.mime_type or "application/pdf",
         )
 
-        # ── Step 2: Get process checklist ──────────────────────────────────
+        # ── 5. Load process and checklist ──────────────────────────────────
         submission = db.query(Submission).filter(Submission.id == submission_id).first()
         process = db.query(Process).filter(Process.id == submission.process_id).first()
         checklist = [
@@ -120,16 +130,65 @@ def process_document(
             for d in sorted(process.documents, key=lambda x: x.sort_order)
         ]
 
-        # ── Step 3: Classify + extract via Claude ──────────────────────────
+        # ── 6. Load extraction fields — STRICT no-fallback ─────────────────
+        extraction_fields_raw = (
+            db.query(ProcessExtractionField)
+            .filter(
+                ProcessExtractionField.process_id == submission.process_id,
+                ProcessExtractionField.is_active.is_(True),
+            )
+            .order_by(ProcessExtractionField.sort_order.asc())
+            .all()
+        )
+
+        # No active fields = extraction disabled for this process
+        if not extraction_fields_raw:
+            logger.warning(
+                f"Process {submission.process_id} has no active extraction "
+                f"fields — classification disabled for {document_id}"
+            )
+            doc.status = "failed"
+            doc.flags = [
+                {
+                    "type": "err",
+                    "message": (
+                        "Extraction is disabled for this process. "
+                        "Go to the process settings and configure "
+                        "extraction fields before uploading documents."
+                    ),
+                }
+            ]
+            db.commit()
+            return {
+                "status": "error",
+                "message": "No extraction fields configured",
+            }
+
+        extraction_fields = [
+            {
+                "name": f.name,
+                "include_in_decision": f.include_in_decision,
+                "null_is_manual": f.null_is_manual,
+            }
+            for f in extraction_fields_raw
+        ]
+
+        logger.info(
+            f"Extraction fields loaded: {len(extraction_fields)} fields "
+            f"for process {submission.process_id}"
+        )
+
+        # ── 7. Classify + extract via Claude ──────────────────────────
         result = classify_and_extract(
             process_name=process.name,
             document_checklist=checklist,
+            extraction_fields=extraction_fields,
             ocr_text=ocr_text,
             file_bytes=file_bytes if not ocr_text else b"",
             mime_type=doc.mime_type or "" if not ocr_text else "",
         )
 
-        # ── Step 4: Persist classification results ─────────────────────────
+        # ── 8. Persist classification results ─────────────────────────
         doc.status = "classified"
         doc.document_type = result.get("documentType")
         doc.matched_doc_id = result.get("matchedDocId")
@@ -140,6 +199,7 @@ def process_document(
         doc.raw_ocr_text = ocr_text
 
         db.commit()
+        db.refresh(doc)
 
         logger.info(
             f"Document classified: {document_id} → "

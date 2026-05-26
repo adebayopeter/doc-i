@@ -552,6 +552,188 @@ if page_name == "Processes":
                             ] = False
                             st.rerun()
 
+                        st.divider()
+                        st.subheader("🔧 Extraction Fields")
+                        st.caption(
+                            "Define which fields Claude extracts from documents. "
+                            "Extraction is **disabled** until at least one "
+                            "active field is added."
+                        )
+
+                        # Load current extraction fields for this process
+                        fields_result = api_get(
+                            f"/v1/processes/{proc['process_id']}/fields"
+                        )
+                        fields_data = fields_result.get("data", {})
+                        current_fields = fields_data.get("items", [])
+                        extraction_enabled = fields_data.get(
+                            "extraction_enabled", False
+                        )
+
+                        # Extraction status banner
+                        if extraction_enabled:
+                            st.success(
+                                f"✅ Extraction enabled — "
+                                f"{fields_data.get('active', 0)} active field(s) "
+                                f"configured"
+                            )
+                        else:
+                            st.error(
+                                "❌ Extraction disabled — no active fields. "
+                                "Add at least one field below to enable "
+                                "AI classification for this process."
+                            )
+
+                        # Show existing fields
+                        if current_fields:
+                            for ef in current_fields:
+                                active_icon = "✅" if ef["is_active"] else "⏸️"
+                                with st.container(border=True):
+                                    c1, c2, c3, c4, c5 = st.columns(
+                                        [3, 2, 2, 2, 1]
+                                    )
+                                    with c1:
+                                        st.markdown(
+                                            f"{active_icon} **{ef['name']}**"
+                                        )
+                                        if ef.get("description"):
+                                            st.caption(ef["description"])
+                                    with c2:
+                                        inc = (
+                                            "📊 In decision"
+                                            if ef["include_in_decision"]
+                                            else "⬜ Excluded"
+                                        )
+                                        st.caption(inc)
+                                    with c3:
+                                        null_label = (
+                                            "⚠️ null → manual"
+                                            if ef["null_is_manual"]
+                                            else "null → skip"
+                                        )
+                                        st.caption(null_label)
+                                    with c4:
+                                        toggle_label = (
+                                            "Disable"
+                                            if ef["is_active"]
+                                            else "Enable"
+                                        )
+                                        if st.button(
+                                                toggle_label,
+                                                key=f"ef_toggle_{ef['id']}",
+                                                use_container_width=True,
+                                        ):
+                                            import requests as req
+
+                                            req.patch(
+                                                f"{API_BASE}/v1/processes/"
+                                                f"{proc['process_id']}"
+                                                f"/fields/{ef['id']}",
+                                                headers=HEADERS,
+                                                json={
+                                                    "is_active": not ef[
+                                                        "is_active"
+                                                    ]
+                                                },
+                                                timeout=10,
+                                            )
+                                            st.rerun()
+                                    with c5:
+                                        if st.button(
+                                                "🗑️",
+                                                key=f"ef_del_{ef['id']}",
+                                                use_container_width=True,
+                                                help="Remove this field",
+                                        ):
+                                            import requests as req
+
+                                            req.delete(
+                                                f"{API_BASE}/v1/processes/"
+                                                f"{proc['process_id']}"
+                                                f"/fields/{ef['id']}",
+                                                headers=HEADERS,
+                                                timeout=10,
+                                            )
+                                            st.rerun()
+
+                        # Add new field form
+                        st.markdown("**Add a field:**")
+                        with st.form(
+                                key=f"add_field_{proc['process_id']}"
+                        ):
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                new_field_name = st.text_input(
+                                    "Field Name *",
+                                    placeholder="e.g. Full Name",
+                                )
+                                new_field_desc = st.text_input(
+                                    "Description",
+                                    placeholder="e.g. Legal full name",
+                                )
+                            with fc2:
+                                new_include = st.checkbox(
+                                    "Include in routing decision",
+                                    value=True,
+                                    help=(
+                                        "If checked, this field's confidence "
+                                        "score affects the auto/review/manual "
+                                        "routing verdict"
+                                    ),
+                                )
+                                new_null_manual = st.checkbox(
+                                    "Missing value → manual",
+                                    value=False,
+                                    help=(
+                                        "If checked, a null or missing value "
+                                        "for this field forces manual routing. "
+                                        "Use for required fields like NIN."
+                                    ),
+                                )
+                                new_sort = st.number_input(
+                                    "Sort order",
+                                    min_value=0,
+                                    value=len(current_fields),
+                                )
+
+                            add_field_submit = st.form_submit_button(
+                                "➕ Add Field",
+                                type="primary",
+                                use_container_width=True,
+                            )
+
+                        if add_field_submit:
+                            if not new_field_name:
+                                st.error("Field name is required.")
+                            else:
+                                import requests as req
+
+                                resp = req.post(
+                                    f"{API_BASE}/v1/processes/"
+                                    f"{proc['process_id']}/fields",
+                                    headers=HEADERS,
+                                    json={
+                                        "name": new_field_name,
+                                        "description": (
+                                                new_field_desc or None
+                                        ),
+                                        "include_in_decision": new_include,
+                                        "null_is_manual": new_null_manual,
+                                        "sort_order": new_sort,
+                                    },
+                                    timeout=10,
+                                )
+                                result = resp.json()
+                                if result.get("success"):
+                                    st.success(
+                                        f"✅ **{new_field_name}** added."
+                                    )
+                                    st.rerun()
+                                else:
+                                    st.error(
+                                        f"❌ {result.get('message', 'Failed')}"
+                                    )
+
 # ══════════════════════════════════════════════════════════════════════
 # PAGE: SUBMISSIONS
 # ══════════════════════════════════════════════════════════════════════
@@ -754,7 +936,7 @@ elif page_name == "Documents":
                     ):
                         with st.spinner("Uploading..."):
                             result = api_post(
-                                f"/v1/documents/submissions/{selected_sid}/upload",
+                                f"{API_BASE}/v1/documents/submissions/{selected_sid}/upload",
                                 files={
                                     "file": (
                                         uploaded_file.name,
@@ -808,7 +990,7 @@ elif page_name == "Documents":
                                 for f in uploaded_files
                             ]
                             response = req.post(
-                                f"/v1/documents/submissions/{selected_sid}/upload-bulk",
+                                f"{API_BASE}/v1/documents/submissions/{selected_sid}/upload-bulk",
                                 headers={
                                     k: v
                                     for k, v in HEADERS.items()

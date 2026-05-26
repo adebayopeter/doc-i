@@ -37,6 +37,11 @@ file_upload = (
     ),
 )
 
+files_upload = File(
+    ...,
+    description="Up to 10 document files.",
+)
+
 # ── Allowed MIME types ─────────────────────────────────────────────────────
 ALLOWED_MIME_TYPES = {
     "application/pdf",
@@ -191,6 +196,8 @@ def _build_document_out(document: SubmissionDocument) -> dict:
 def _get_file_bytes_b64(document_id: str, db: Session) -> str | None:
     """Fetch file from MinIO and return as base64 for Celery task."""
     import base64
+
+    from services.storage import get_file
 
     doc = (
         db.query(SubmissionDocument)
@@ -668,9 +675,12 @@ def delete_document(
 )
 def upload_bulk_documents(
     submission_id: str,
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = files_upload,
     db: Session = db_dependency,
 ):
+    from services.storage import upload_file
+    from workers.tasks import process_document
+
     submission = _get_submission_or_404(submission_id, db)
 
     if submission.status == "complete":
@@ -714,7 +724,7 @@ def upload_bulk_documents(
             storage_path = upload_file(
                 file_bytes=contents,
                 filename=file.filename,
-                content_type=file.content_type,
+                mime_type=file.content_type,
                 submission_id=submission_id,
             )
 
