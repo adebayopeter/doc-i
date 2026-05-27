@@ -1,0 +1,548 @@
+import requests
+import streamlit as st
+
+from api_client import api_delete, api_get, api_post, get_categories
+from constants import API_BASE, HEADERS
+
+
+def render():
+    st.title("📁 Processes")
+    st.caption(
+        "Define document workflows. Each process specifies which documents "
+        "are required — the AI uses this checklist to classify uploads."
+    )
+
+    # ── Create new process ─────────────────────────────────────────────
+    with st.expander("➕ Create New Process", expanded=False):
+        st.subheader("Document Checklist")
+        st.caption("Add the documents required for this process (minimum 1).")
+
+        num_docs = st.number_input(
+            "Number of documents",
+            min_value=1,
+            max_value=20,
+            value=st.session_state.get("num_docs", 3),
+            key="num_docs",
+        )
+
+        with st.form("create_process"):
+            col1, col2 = st.columns(2)
+            with col1:
+                name = st.text_input(
+                    "Process Name *",
+                    placeholder="e.g. RSA Mortgage",
+                )
+                description = st.text_area(
+                    "Description",
+                    placeholder="What this process is for",
+                    height=80,
+                )
+            with col2:
+                color_var = st.selectbox(
+                    "Colour",
+                    ["info", "success", "warning", "danger"],
+                )
+                icon = st.text_input(
+                    "Icon",
+                    value="ti-file",
+                    placeholder="Tabler icon name",
+                )
+
+            st.subheader("Document Checklist")
+            st.caption("Fill in all document rows below.")
+
+            doc_rows = []
+            for i in range(int(num_docs)):
+                c1, c2, c3 = st.columns([4, 3, 2])
+                with c1:
+                    doc_name = st.text_input(
+                        f"Document {i + 1} name",
+                        key=f"doc_name_{i}",
+                        placeholder="e.g. National ID / NIN slip",
+                    )
+                with c2:
+                    all_categories = get_categories()
+                    if all_categories:
+                        doc_cat = st.selectbox(
+                            "Category",
+                            options=all_categories,
+                            index=0,
+                            key=f"doc_cat_{i}",
+                        )
+                    else:
+                        doc_cat = st.text_input(
+                            "Category",
+                            key=f"doc_cat_{i}",
+                            placeholder="No categories yet — add them in Config",
+                        )
+                with c3:
+                    doc_req = st.checkbox(
+                        "Required",
+                        key=f"doc_req_{i}",
+                        value=True,
+                    )
+                if doc_name and doc_cat:
+                    doc_rows.append(
+                        {
+                            "name": doc_name,
+                            "category": doc_cat,
+                            "is_required": doc_req,
+                        }
+                    )
+
+            submitted = st.form_submit_button(
+                "Create Process", type="primary", use_container_width=True
+            )
+
+        if submitted:
+            if not name:
+                st.error("Process name is required.")
+            elif len(doc_rows) == 0:
+                st.error("At least one complete document is required.")
+            else:
+                result = api_post(
+                    "/v1/processes",
+                    json={
+                        "name": name,
+                        "description": description,
+                        "color_var": color_var,
+                        "icon": icon,
+                        "documents": doc_rows,
+                    },
+                )
+                if result.get("success"):
+                    st.success(
+                        f"✅ Process created: **{name}** "
+                        f"(ID: `{result['data']['process_id']}`)"
+                    )
+                    st.rerun()
+                else:
+                    st.error(f"❌ {result.get('message', 'Failed to create process')}")
+
+    st.divider()
+
+    # ── List processes ─────────────────────────────────────────────────
+    result = api_get("/v1/processes")
+    if not result.get("success"):
+        st.error(f"Could not load processes: {result.get('message')}")
+    else:
+        data = result.get("data", {})
+        processes = data.get("items", [])
+        total = data.get("total", 0)
+
+        st.subheader(f"All Processes ({total})")
+
+        if total == 0:
+            st.info(
+                "No processes yet. Create one above to get started."
+            )
+        else:
+            for proc in processes:
+                with st.container(border=True):
+                    col1, col2, col3, col4 = st.columns([4, 2, 2, 2])
+                    with col1:
+                        st.markdown(f"**{proc['name']}**")
+                        if proc.get("description"):
+                            st.caption(proc["description"])
+                        st.caption(
+                            f"`{proc['process_id']}` · "
+                            f"{proc['document_count']} documents"
+                        )
+                    with col2:
+                        if st.button(
+                                "✏️ Edit",
+                                key=f"edit_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state[f"editing_{proc['process_id']}"] = (
+                                not st.session_state.get(
+                                    f"editing_{proc['process_id']}", False
+                                )
+                            )
+                            st.rerun()
+                    with col3:
+                        if st.button(
+                                "Open",
+                                key=f"open_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state.selected_process_id = proc[
+                                "process_id"
+                            ]
+                            st.session_state.active_page = "Submissions"
+                            st.rerun()
+                    with col4:
+                        if st.button(
+                                "🗑️ Deactivate",
+                                key=f"del_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = True
+                            st.rerun()
+
+                # ── Deactivate confirmation ────────────────────────────────
+                if st.session_state.get(f"confirm_delete_{proc['process_id']}"):
+                    st.warning(
+                        f"⚠️ Deactivate **{proc['name']}**? "
+                        f"It will be hidden from all lists. "
+                        f"Existing submissions are unaffected."
+                    )
+                    col_yes, col_no = st.columns(2)
+                    with col_yes:
+                        if st.button(
+                                "Yes, deactivate",
+                                key=f"confirm_yes_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            result = api_delete(
+                                f"/v1/processes/{proc['process_id']}"
+                            )
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = False
+                            if result.get("success"):
+                                st.success(f"✅ {proc['name']} deactivated.")
+                            else:
+                                st.error(result.get("message", "Failed"))
+                            st.rerun()
+                    with col_no:
+                        if st.button(
+                                "Cancel",
+                                key=f"confirm_no_{proc['process_id']}",
+                                use_container_width=True,
+                        ):
+                            st.session_state[
+                                f"confirm_delete_{proc['process_id']}"
+                            ] = False
+                            st.rerun()
+
+                # ── Inline edit form ───────────────────────────────────────
+                if st.session_state.get(f"editing_{proc['process_id']}"):
+                    _render_edit_form(proc)
+
+
+def _render_edit_form(proc: dict):
+    """Renders the inline edit form for a process."""
+    detail_result = api_get(f"/v1/processes/{proc['process_id']}")
+    detail = detail_result.get("data", {})
+    current_docs = detail.get("documents", [])
+
+    with st.expander(f"✏️ Editing: {proc['name']}", expanded=True):
+        # Metadata fields outside form for immediate render
+        edit_num_docs = st.number_input(
+            "Number of documents",
+            min_value=1,
+            max_value=20,
+            value=max(len(current_docs), 1),
+            key=f"edit_num_{proc['process_id']}",
+        )
+
+        with st.form(key=f"edit_form_{proc['process_id']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_name = st.text_input(
+                    "Process Name",
+                    value=detail.get("name", ""),
+                )
+                edit_desc = st.text_area(
+                    "Description",
+                    value=detail.get("description") or "",
+                    height=80,
+                )
+            with col2:
+                edit_colour = st.selectbox(
+                    "Colour",
+                    ["info", "success", "warning", "danger"],
+                    index=["info", "success", "warning", "danger"].index(
+                        detail.get("color_var", "info")
+                    ),
+                )
+                edit_icon = st.text_input(
+                    "Icon",
+                    value=detail.get("icon", "ti-file"),
+                )
+
+            st.subheader("Document Checklist")
+            all_categories = get_categories()
+
+            edit_docs = []
+            for i in range(int(edit_num_docs)):
+                existing = (
+                    current_docs[i]
+                    if i < len(current_docs)
+                    else {}
+                )
+                c1, c2, c3 = st.columns([4, 3, 2])
+                with c1:
+                    doc_name = st.text_input(
+                        f"Document {i + 1} name",
+                        value=existing.get("name", ""),
+                        key=f"edit_doc_name_{proc['process_id']}_{i}",
+                    )
+                with c2:
+                    if all_categories:
+                        current_cat = existing.get("category", "")
+                        cat_index = (
+                            all_categories.index(current_cat)
+                            if current_cat in all_categories
+                            else 0
+                        )
+                        doc_cat = st.selectbox(
+                            "Category",
+                            options=all_categories,
+                            index=cat_index,
+                            key=f"edit_doc_cat_{proc['process_id']}_{i}",
+                        )
+                    else:
+                        doc_cat = st.text_input(
+                            "Category",
+                            value=existing.get("category", ""),
+                            key=f"edit_doc_cat_{proc['process_id']}_{i}",
+                        )
+                with c3:
+                    doc_req = st.checkbox(
+                        "Required",
+                        value=existing.get("is_required", True),
+                        key=f"edit_doc_req_{proc['process_id']}_{i}",
+                    )
+                if doc_name and doc_cat:
+                    edit_docs.append(
+                        {
+                            "name": doc_name,
+                            "category": doc_cat,
+                            "is_required": doc_req,
+                        }
+                    )
+
+            col_save, col_cancel = st.columns(2)
+            with col_save:
+                save = st.form_submit_button(
+                    "💾 Save Changes",
+                    type="primary",
+                    use_container_width=True,
+                )
+            with col_cancel:
+                cancel = st.form_submit_button(
+                    "Cancel",
+                    use_container_width=True,
+                )
+
+        if save:
+            if not edit_name:
+                st.error("Process name is required.")
+            elif len(edit_docs) == 0:
+                st.error(
+                    "Fill in at least one complete document "
+                    "(name and category both required)."
+                )
+            else:
+                import requests as req
+
+                response = req.patch(
+                    f"{API_BASE}/v1/processes/{proc['process_id']}",
+                    headers=HEADERS,
+                    json={
+                        "name": edit_name,
+                        "description": edit_desc or None,
+                        "color_var": edit_colour,
+                        "icon": edit_icon,
+                        "documents": edit_docs,
+                    },
+                    timeout=10,
+                )
+                result = response.json()
+                if result.get("success"):
+                    st.success(
+                        f"✅ Process updated — "
+                        f"{result['data']['document_count']} documents"
+                    )
+                    st.session_state[
+                        f"editing_{proc['process_id']}"
+                    ] = False
+                    st.rerun()
+                else:
+                    st.error(
+                        f"❌ {result.get('message', 'Update failed')}"
+                    )
+
+        if cancel:
+            st.session_state[f"editing_{proc['process_id']}"] = False
+            st.rerun()
+
+        # ── Extraction fields ──────────────────────────────────────────
+        _render_extraction_fields(proc["process_id"])
+
+
+def _render_extraction_fields(process_id: str):
+    """Renders the extraction field configuration section."""
+    st.divider()
+    st.subheader("🔧 Extraction Fields")
+    st.caption(
+        "Define which fields Claude extracts from documents. "
+        "Extraction is **disabled** until at least one "
+        "active field is added."
+    )
+
+    # Load current extraction fields for this process
+    fields_result = api_get(
+        f"/v1/processes/{process_id}/fields"
+    )
+    fields_data = fields_result.get("data", {})
+    current_fields = fields_data.get("items", [])
+    extraction_enabled = fields_data.get(
+        "extraction_enabled", False
+    )
+
+    # Extraction status banner
+    if extraction_enabled:
+        st.success(
+            f"✅ Extraction enabled — "
+            f"{fields_data.get('active', 0)} active field(s) "
+            f"configured"
+        )
+    else:
+        st.error(
+            "❌ Extraction disabled — no active fields. "
+            "Add at least one field below to enable "
+            "AI classification for this process."
+        )
+
+    # Show existing fields
+    for ef in current_fields:
+        active_icon = "✅" if ef["is_active"] else "⏸️"
+        with st.container(border=True):
+            c1, c2, c3, c4, c5 = st.columns(
+                [3, 2, 2, 2, 1]
+            )
+            with c1:
+                st.markdown(
+                    f"{active_icon} **{ef['name']}**"
+                )
+                if ef.get("description"):
+                    st.caption(ef["description"])
+            with c2:
+                inc = (
+                    "📊 In decision"
+                    if ef["include_in_decision"]
+                    else "⬜ Excluded"
+                )
+                st.caption(inc)
+            with c3:
+                null_label = (
+                    "⚠️ null → manual"
+                    if ef["null_is_manual"]
+                    else "null → skip"
+                )
+                st.caption(null_label)
+            with c4:
+                toggle_label = (
+                    "Disable"
+                    if ef["is_active"]
+                    else "Enable"
+                )
+                if st.button(
+                        toggle_label,
+                        key=f"ef_toggle_{ef['id']}",
+                        use_container_width=True,
+                ):
+                    requests.patch(
+                        f"{API_BASE}/v1/processes/{process_id}/fields/{ef['id']}",
+                        headers=HEADERS,
+                        json={
+                            "is_active": not ef[
+                                "is_active"
+                            ]
+                        },
+                        timeout=10,
+                    )
+                    st.rerun()
+            with c5:
+                if st.button(
+                        "🗑️",
+                        key=f"ef_del_{ef['id']}",
+                        use_container_width=True,
+                        help="Remove this field",
+                ):
+                    requests.delete(
+                        f"{API_BASE}/v1/processes/{process_id}/fields/{ef['id']}",
+                        headers=HEADERS,
+                        timeout=10,
+                    )
+                    st.rerun()
+
+    # Add new field form
+    st.markdown("**Add a field:**")
+    with st.form(
+            key=f"add_field_{process_id}"
+    ):
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            new_field_name = st.text_input(
+                "Field Name *",
+                placeholder="e.g. Full Name",
+            )
+            new_field_desc = st.text_input(
+                "Description",
+                placeholder="e.g. Legal full name",
+            )
+        with fc2:
+            new_include = st.checkbox(
+                "Include in routing decision",
+                value=True,
+                help=(
+                    "If checked, this field's confidence "
+                    "score affects the auto/review/manual "
+                    "routing verdict"
+                ),
+            )
+            new_null_manual = st.checkbox(
+                "Missing value → manual",
+                value=False,
+                help=(
+                    "If checked, a null or missing value "
+                    "for this field forces manual routing. "
+                    "Use for required fields like NIN."
+                ),
+            )
+            new_sort = st.number_input(
+                "Sort order",
+                min_value=0,
+                value=len(current_fields),
+            )
+
+        add_field_submit = st.form_submit_button(
+            "➕ Add Field",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if add_field_submit:
+        if not new_field_name:
+            st.error("Field name is required.")
+        else:
+            resp = requests.post(
+                f"{API_BASE}/v1/processes/{process_id}/fields",
+                headers=HEADERS,
+                json={
+                    "name": new_field_name,
+                    "description": (
+                            new_field_desc or None
+                    ),
+                    "include_in_decision": new_include,
+                    "null_is_manual": new_null_manual,
+                    "sort_order": new_sort,
+                },
+                timeout=10,
+            )
+            result = resp.json()
+            if result.get("success"):
+                st.success(
+                    f"✅ **{new_field_name}** added."
+                )
+                st.rerun()
+            else:
+                st.error(
+                    f"❌ {result.get('message', 'Failed')}"
+                )
