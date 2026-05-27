@@ -10,7 +10,7 @@ import streamlit as st
 
 from api_client import check_api_health
 from constants import API_BASE
-from pages import analysis, config, documents, processes, submissions
+from views import analysis, config, documents, processes, submissions
 
 # ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
