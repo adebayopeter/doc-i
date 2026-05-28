@@ -87,9 +87,73 @@ class ProcessDocument(Base):
 
     # relationships
     process = relationship("Process", back_populates="documents")
+    extraction_fields = relationship(
+        "ProcessDocumentField",
+        back_populates="process_document",
+        cascade="all, delete-orphan",
+        order_by="ProcessDocumentField.sort_order",
+    )
 
     def __repr__(self):
         return f"<ProcessDocument id={self.id} name={self.name}>"
+
+
+class ProcessDocumentField(Base):
+    """
+    Per-document field configuration for AI extraction and decisioning.
+
+    Fields are tied to a specific document in the process checklist —
+    not to the process as a whole. This means:
+      - NIN Slip extracts: Full Name, NIN, Date of Birth, Expiry Date
+      - Bank Statement extracts: Full Name, Account Number, Bank Name
+      - Each document knows exactly what it should contain
+
+    If a document in the checklist has no active fields, it will be
+    classified (document type identified) but no fields will be extracted.
+
+    If NO document in a process has any fields configured, classification
+    is disabled entirely for that process.
+    """
+
+    __tablename__ = "process_document_fields"
+
+    id = Column(
+        String,
+        primary_key=True,
+        default=lambda: _gen_id("pdf"),
+    )
+    process_document_id = Column(
+        Integer,
+        ForeignKey("process_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(200), nullable=False)
+    description = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    include_in_decision = Column(Boolean, default=True, nullable=False)
+    null_is_manual = Column(Boolean, default=False, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    # relationships
+    process_document = relationship(
+        "ProcessDocument", back_populates="extraction_fields"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "process_document_id",
+            "name",
+            name="uq_process_document_field_name",
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<ProcessDocumentField id={self.id} "
+            f"doc={self.process_document_id} name={self.name}>"
+        )
 
 
 class ProcessExtractionField(Base):

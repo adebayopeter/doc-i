@@ -65,12 +65,7 @@ def process_document(
     import base64
 
     from config.logging import get_logger
-    from db.models import (
-        Process,
-        ProcessExtractionField,
-        Submission,
-        SubmissionDocument,
-    )
+    from db.models import Process, Submission, SubmissionDocument
     from db.session import SessionLocal
     from services.extraction import classify_and_extract
     from services.ocr import extract_text
@@ -121,31 +116,36 @@ def process_document(
         # ── 5. Load process and checklist ──────────────────────────────────
         submission = db.query(Submission).filter(Submission.id == submission_id).first()
         process = db.query(Process).filter(Process.id == submission.process_id).first()
-        checklist = [
-            {
-                "id": d.id,
-                "name": d.name,
-                "category": d.category,
-            }
-            for d in sorted(process.documents, key=lambda x: x.sort_order)
-        ]
 
-        # ── 6. Load extraction fields — STRICT no-fallback ─────────────────
-        extraction_fields_raw = (
-            db.query(ProcessExtractionField)
-            .filter(
-                ProcessExtractionField.process_id == submission.process_id,
-                ProcessExtractionField.is_active.is_(True),
+        # ── 6. Build checklist with per-document fields ─────────────────
+        checklist_with_fields = []
+        for d in sorted(process.documents, key=lambda x: x.sort_order):
+            active_fields = [
+                {
+                    "name": f.name,
+                    "include_in_decision": f.include_in_decision,
+                    "null_is_manual": f.null_is_manual,
+                }
+                for f in sorted(d.extraction_fields, key=lambda x: x.sort_order)
+                if f.is_active
+            ]
+            checklist_with_fields.append(
+                {
+                    "id": d.id,
+                    "name": d.name,
+                    "category": d.category,
+                    "fields": active_fields,
+                }
             )
-            .order_by(ProcessExtractionField.sort_order.asc())
-            .all()
-        )
 
-        # No active fields = extraction disabled for this process
-        if not extraction_fields_raw:
+        # STRICT — no fields on ANY document = extraction disabled
+        any_fields_configured = any(len(d["fields"]) > 0 for d in checklist_with_fields)
+
+        if not any_fields_configured:
             logger.warning(
-                f"Process {submission.process_id} has no active extraction "
-                f"fields — classification disabled for {document_id}"
+                f"Process {submission.process_id} has no extraction fields "
+                f"configured on any document — classification disabled "
+                f"for {document_id}"
             )
             doc.status = "failed"
             doc.flags = [
@@ -153,36 +153,29 @@ def process_document(
                     "type": "err",
                     "message": (
                         "Extraction is disabled for this process. "
-                        "Go to the process settings and configure "
-                        "extraction fields before uploading documents."
+                        "Go to the process settings, open each document "
+                        "in the checklist, and configure the fields you "
+                        "want Claude to extract before uploading documents."
                     ),
                 }
             ]
             db.commit()
             return {
                 "status": "error",
-                "message": "No extraction fields configured",
+                "message": "No extraction fields configured on any document",
             }
 
-        extraction_fields = [
-            {
-                "name": f.name,
-                "include_in_decision": f.include_in_decision,
-                "null_is_manual": f.null_is_manual,
-            }
-            for f in extraction_fields_raw
-        ]
-
+        total_fields = sum(len(d["fields"]) for d in checklist_with_fields)
         logger.info(
-            f"Extraction fields loaded: {len(extraction_fields)} fields "
+            f"Extraction fields loaded: {total_fields} fields across "
+            f"{len(checklist_with_fields)} documents "
             f"for process {submission.process_id}"
         )
 
         # ── 7. Classify + extract via Claude ──────────────────────────
         result = classify_and_extract(
             process_name=process.name,
-            document_checklist=checklist,
-            extraction_fields=extraction_fields,
+            checklist_with_fields=checklist_with_fields,
             ocr_text=ocr_text,
             file_bytes=file_bytes if not ocr_text else b"",
             mime_type=doc.mime_type or "" if not ocr_text else "",

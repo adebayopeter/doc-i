@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import (
-    ProcessExtractionField,
+    ProcessDocumentField,
     Submission,
     SubmissionDocument,
     ValidationRule,
@@ -490,42 +490,38 @@ def get_decision(
     submission_id: str,
     db: Session = db_dependency,
 ):
-    submission = _get_submission_or_404(submission_id, db)
+    _get_submission_or_404(submission_id, db)
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
     rules = db.query(ValidationRule).all()
     validation_results = run_rules(record, rules)
 
-    # Load per-process field configs — controls which fields affect routing
-    # and whether null values route to manual
-    extraction_fields = (
-        db.query(ProcessExtractionField)
-        .filter(
-            ProcessExtractionField.process_id == submission.process_id,
-            ProcessExtractionField.is_active.is_(True),
+    field_configs: dict = {}
+    for doc in classified:
+        if not doc.matched_doc_id:
+            continue
+        doc_fields = (
+            db.query(ProcessDocumentField)
+            .filter(
+                ProcessDocumentField.process_document_id == doc.matched_doc_id,
+                ProcessDocumentField.is_active.is_(True),
+            )
+            .all()
         )
-        .all()
-    )
-
-    # Build field_configs dict — None if no fields configured
-    # (falls back to legacy behaviour in compute_decision)
-    field_configs = (
-        {
-            f.name: {
-                "include_in_decision": f.include_in_decision,
-                "null_is_manual": f.null_is_manual,
-            }
-            for f in extraction_fields
-        }
-        if extraction_fields
-        else None
-    )
+        for f in doc_fields:
+            # If the same field appears in multiple documents, the first
+            # occurrence wins (highest-confidence document sorted earlier)
+            if f.name not in field_configs:
+                field_configs[f.name] = {
+                    "include_in_decision": f.include_in_decision,
+                    "null_is_manual": f.null_is_manual,
+                }
 
     decision = compute_decision(
         record,
         validation_results,
         thresholds=get_current_thresholds(),
-        field_configs=field_configs,
+        field_configs=field_configs if field_configs else None,
     )
 
     logger.info(

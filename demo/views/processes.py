@@ -376,173 +376,182 @@ def _render_edit_form(proc: dict):
 
 
 def _render_extraction_fields(process_id: str):
-    """Renders the extraction field configuration section."""
+    """Renders per-document extraction field configuration."""
     st.divider()
     st.subheader("🔧 Extraction Fields")
     st.caption(
-        "Define which fields Claude extracts from documents. "
-        "Extraction is **disabled** until at least one "
-        "active field is added."
+        "Configure which fields Claude extracts from each document type. "
+        "Fields are set per document — NIN Slip extracts different fields "
+        "than a Bank Statement. Extraction is **disabled** until at least "
+        "one document has at least one active field."
     )
 
-    # Load current extraction fields for this process
-    fields_result = api_get(
-        f"/v1/processes/{process_id}/fields"
-    )
-    fields_data = fields_result.get("data", {})
-    current_fields = fields_data.get("items", [])
-    extraction_enabled = fields_data.get(
-        "extraction_enabled", False
-    )
+    # Load summary across all documents
+    summary_result = api_get(f"/v1/processes/{process_id}/fields/summary")
+    if not summary_result.get("success"):
+        st.error("Could not load field configuration.")
+        return
 
-    # Extraction status banner
+    summary = summary_result.get("data", {})
+    extraction_enabled = summary.get("extraction_enabled", False)
+    docs_with_fields = summary.get("documents_with_fields", 0)
+    total_docs = summary.get("total_documents", 0)
+
     if extraction_enabled:
         st.success(
             f"✅ Extraction enabled — "
-            f"{fields_data.get('active', 0)} active field(s) "
-            f"configured"
+            f"{docs_with_fields}/{total_docs} documents have fields configured"
         )
     else:
         st.error(
-            "❌ Extraction disabled — no active fields. "
-            "Add at least one field below to enable "
-            "AI classification for this process."
+            "❌ Extraction disabled — no documents have fields configured. "
+            "Expand a document below and add at least one field."
         )
 
-    # Show existing fields
-    for ef in current_fields:
-        active_icon = "✅" if ef["is_active"] else "⏸️"
-        with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns(
-                [3, 2, 2, 2, 1]
-            )
-            with c1:
-                st.markdown(
-                    f"{active_icon} **{ef['name']}**"
+    # Show each document with its fields
+    for doc_data in summary.get("documents", []):
+        doc_id = doc_data["process_document_id"]
+        doc_name = doc_data["document_name"]
+        fields_configured = doc_data["fields_configured"]
+        active_count = doc_data["active"]
+
+        status_icon = "✅" if fields_configured else "⚠️"
+        status_text = (
+            f"{active_count} field(s)" if fields_configured else "no fields"
+        )
+
+        with st.expander(
+            f"{status_icon} **{doc_name}** — {status_text}",
+            expanded=not fields_configured,
+        ):
+            # Show existing fields for this document
+            existing_fields = doc_data.get("items", [])
+            if existing_fields:
+                for ef in existing_fields:
+                    active_icon = "✅" if ef["is_active"] else "⏸️"
+                    with st.container(border=True):
+                        c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
+                        with c1:
+                            st.markdown(f"{active_icon} **{ef['name']}**")
+                            if ef.get("description"):
+                                st.caption(ef["description"])
+                        with c2:
+                            st.caption(
+                                "📊 In decision"
+                                if ef["include_in_decision"]
+                                else "⬜ Excluded"
+                            )
+                        with c3:
+                            st.caption(
+                                "⚠️ null → manual"
+                                if ef["null_is_manual"]
+                                else "null → skip"
+                            )
+                        with c4:
+                            toggle_label = (
+                                "Disable" if ef["is_active"] else "Enable"
+                            )
+                            if st.button(
+                                toggle_label,
+                                key=f"ef_toggle_{ef['id']}",
+                                use_container_width=True,
+                            ):
+                                requests.patch(
+                                    f"{API_BASE}/v1/processes/{process_id}"
+                                    f"/documents/{doc_id}/fields/{ef['id']}",
+                                    headers=HEADERS,
+                                    json={"is_active": not ef["is_active"]},
+                                    timeout=10,
+                                )
+                                st.rerun()
+                        with c5:
+                            if st.button(
+                                "🗑️",
+                                key=f"ef_del_{ef['id']}",
+                                use_container_width=True,
+                                help="Remove this field",
+                            ):
+                                requests.delete(
+                                    f"{API_BASE}/v1/processes/{process_id}"
+                                    f"/documents/{doc_id}/fields/{ef['id']}",
+                                    headers=HEADERS,
+                                    timeout=10,
+                                )
+                                st.rerun()
+            else:
+                st.info(
+                    f"No fields configured for **{doc_name}** yet. "
+                    f"Add fields below — this document will be classified "
+                    f"but no data will be extracted until fields are added."
                 )
-                if ef.get("description"):
-                    st.caption(ef["description"])
-            with c2:
-                inc = (
-                    "📊 In decision"
-                    if ef["include_in_decision"]
-                    else "⬜ Excluded"
+
+            # Add new field form
+            st.markdown("**Add a field:**")
+            with st.form(key=f"add_field_{process_id}_{doc_id}"):
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    new_field_name = st.text_input(
+                        "Field Name *",
+                        placeholder="e.g. Full Name",
+                        key=f"fn_{process_id}_{doc_id}",
+                    )
+                    new_field_desc = st.text_input(
+                        "Description",
+                        placeholder="e.g. Legal full name",
+                        key=f"fd_{process_id}_{doc_id}",
+                    )
+                with fc2:
+                    new_include = st.checkbox(
+                        "Include in routing decision",
+                        value=True,
+                        key=f"fi_{process_id}_{doc_id}",
+                        help=(
+                            "If checked, this field's confidence score "
+                            "affects the auto/review/manual routing verdict"
+                        ),
+                    )
+                    new_null_manual = st.checkbox(
+                        "Missing value → manual",
+                        value=False,
+                        key=f"fm_{process_id}_{doc_id}",
+                        help=(
+                            "If checked, a null or missing value forces "
+                            "manual routing. Use for required fields."
+                        ),
+                    )
+                    new_sort = st.number_input(
+                        "Sort order",
+                        min_value=0,
+                        value=len(existing_fields),
+                        key=f"fs_{process_id}_{doc_id}",
+                    )
+
+                add_submit = st.form_submit_button(
+                    "➕ Add Field",
+                    type="primary",
+                    use_container_width=True,
                 )
-                st.caption(inc)
-            with c3:
-                null_label = (
-                    "⚠️ null → manual"
-                    if ef["null_is_manual"]
-                    else "null → skip"
-                )
-                st.caption(null_label)
-            with c4:
-                toggle_label = (
-                    "Disable"
-                    if ef["is_active"]
-                    else "Enable"
-                )
-                if st.button(
-                        toggle_label,
-                        key=f"ef_toggle_{ef['id']}",
-                        use_container_width=True,
-                ):
-                    requests.patch(
-                        f"{API_BASE}/v1/processes/{process_id}/fields/{ef['id']}",
+
+            if add_submit:
+                if not new_field_name:
+                    st.error("Field name is required.")
+                else:
+                    resp = requests.post(
+                        f"{API_BASE}/v1/processes/{process_id}"
+                        f"/documents/{doc_id}/fields",
                         headers=HEADERS,
                         json={
-                            "is_active": not ef[
-                                "is_active"
-                            ]
+                            "name": new_field_name,
+                            "description": new_field_desc or None,
+                            "include_in_decision": new_include,
+                            "null_is_manual": new_null_manual,
+                            "sort_order": new_sort,
                         },
                         timeout=10,
                     )
-                    st.rerun()
-            with c5:
-                if st.button(
-                        "🗑️",
-                        key=f"ef_del_{ef['id']}",
-                        use_container_width=True,
-                        help="Remove this field",
-                ):
-                    requests.delete(
-                        f"{API_BASE}/v1/processes/{process_id}/fields/{ef['id']}",
-                        headers=HEADERS,
-                        timeout=10,
-                    )
-                    st.rerun()
-
-    # Add new field form
-    st.markdown("**Add a field:**")
-    with st.form(
-            key=f"add_field_{process_id}"
-    ):
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            new_field_name = st.text_input(
-                "Field Name *",
-                placeholder="e.g. Full Name",
-            )
-            new_field_desc = st.text_input(
-                "Description",
-                placeholder="e.g. Legal full name",
-            )
-        with fc2:
-            new_include = st.checkbox(
-                "Include in routing decision",
-                value=True,
-                help=(
-                    "If checked, this field's confidence "
-                    "score affects the auto/review/manual "
-                    "routing verdict"
-                ),
-            )
-            new_null_manual = st.checkbox(
-                "Missing value → manual",
-                value=False,
-                help=(
-                    "If checked, a null or missing value "
-                    "for this field forces manual routing. "
-                    "Use for required fields like NIN."
-                ),
-            )
-            new_sort = st.number_input(
-                "Sort order",
-                min_value=0,
-                value=len(current_fields),
-            )
-
-        add_field_submit = st.form_submit_button(
-            "➕ Add Field",
-            type="primary",
-            use_container_width=True,
-        )
-
-    if add_field_submit:
-        if not new_field_name:
-            st.error("Field name is required.")
-        else:
-            resp = requests.post(
-                f"{API_BASE}/v1/processes/{process_id}/fields",
-                headers=HEADERS,
-                json={
-                    "name": new_field_name,
-                    "description": (
-                            new_field_desc or None
-                    ),
-                    "include_in_decision": new_include,
-                    "null_is_manual": new_null_manual,
-                    "sort_order": new_sort,
-                },
-                timeout=10,
-            )
-            result = resp.json()
-            if result.get("success"):
-                st.success(
-                    f"✅ **{new_field_name}** added."
-                )
-                st.rerun()
-            else:
-                st.error(
-                    f"❌ {result.get('message', 'Failed')}"
-                )
+                    result = resp.json()
+                    if result.get("success"):
+                        st.success(f"✅ **{new_field_name}** added to {doc_name}.")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {result.get('message', 'Failed')}")

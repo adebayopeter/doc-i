@@ -1,14 +1,36 @@
 """
 Per-process extraction field configuration.
 
-    POST   /v1/processes/{id}/fields         Add a field to a process
-    GET    /v1/processes/{id}/fields         List all fields for a process
-    GET    /v1/processes/{id}/fields/{fid}   Get a single field
-    PATCH  /v1/processes/{id}/fields/{fid}   Update field settings
-    DELETE /v1/processes/{id}/fields/{fid}   Remove a field
+Fields are tied to individual documents in the process checklist,
+not to the process as a whole. This enables precise extraction —
+each document type declares exactly which fields it should contain.
 
-If a process has no active extraction fields, AI classification
-is disabled — documents are stored but not sent to Claude.
+Endpoints:
+    POST   /v1/processes/{pid}/documents/{did}/fields
+           Add a field to a checklist document
+
+    GET    /v1/processes/{pid}/documents/{did}/fields
+           List all fields for a checklist document
+
+    GET    /v1/processes/{pid}/documents/{did}/fields/{fid}
+           Get a single field
+
+    PATCH  /v1/processes/{pid}/documents/{did}/fields/{fid}
+           Update a field
+
+    DELETE /v1/processes/{pid}/documents/{did}/fields/{fid}
+           Remove a field
+
+    GET    /v1/processes/{pid}/fields/summary
+           Get field configuration summary across all documents
+           in the process — shows extraction_enabled status
+
+Extraction rules:
+  - A document with no active fields is classified only (type identified,
+    no fields extracted)
+  - A process where NO document has any fields configured is fully disabled —
+    documents are stored but not sent to Claude
+  - There is no fallback and no hardcoded field list
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,9 +38,9 @@ from sqlalchemy.orm import Session
 
 from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
-from db.models import Process, ProcessExtractionField
+from db.models import Process, ProcessDocument, ProcessDocumentField
 from schemas.base import error_response, success_response
-from schemas.extraction_field import ExtractionFieldCreate, ExtractionFieldUpdate
+from schemas.extraction_field import DocumentFieldCreate, DocumentFieldUpdate
 
 logger = get_logger(__name__)
 
@@ -51,6 +73,18 @@ _404_process = {
         }
     },
 }
+_404_document = {
+    "description": "Checklist document not found",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Checklist document not found",
+                "data": None,
+            }
+        }
+    },
+}
 _404_field = {
     "description": "Extraction field not found",
     "content": {
@@ -59,6 +93,18 @@ _404_field = {
                 "success": False,
                 "message": "Extraction field not found",
                 "data": None,
+            }
+        }
+    },
+}
+_409 = {
+    "description": "Field name already exists for this document",
+    "content": {
+        "application/json": {
+            "example": {
+                "success": False,
+                "message": "Field 'Full Name' already exists for this document",
+                "data": {"existing_id": "pdf_1a2b3c4d5e6f"},
             }
         }
     },
@@ -109,14 +155,31 @@ def _get_process_or_404(process_id: str, db: Session) -> Process:
     return process
 
 
-def _get_field_or_404(
-    field_id: str, process_id: str, db: Session
-) -> ProcessExtractionField:
-    field = (
-        db.query(ProcessExtractionField)
+def _get_checklist_doc_or_404(
+    doc_id: int, process_id: str, db: Session
+) -> ProcessDocument:
+    doc = (
+        db.query(ProcessDocument)
         .filter(
-            ProcessExtractionField.id == field_id,
-            ProcessExtractionField.process_id == process_id,
+            ProcessDocument.id == doc_id,
+            ProcessDocument.process_id == process_id,
+        )
+        .first()
+    )
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response("Checklist document not found"),
+        )
+    return doc
+
+
+def _get_field_or_404(field_id: str, doc_id: int, db: Session) -> ProcessDocumentField:
+    field = (
+        db.query(ProcessDocumentField)
+        .filter(
+            ProcessDocumentField.id == field_id,
+            ProcessDocumentField.process_document_id == doc_id,
         )
         .first()
     )
@@ -128,10 +191,10 @@ def _get_field_or_404(
     return field
 
 
-def _build_field_out(field: ProcessExtractionField) -> dict:
+def _build_field_out(field: ProcessDocumentField) -> dict:
     return {
         "id": field.id,
-        "process_id": field.process_id,
+        "process_document_id": field.process_document_id,
         "name": field.name,
         "description": field.description,
         "is_active": field.is_active,
@@ -142,68 +205,175 @@ def _build_field_out(field: ProcessExtractionField) -> dict:
     }
 
 
-# ── POST /v1/processes/{id}/fields ────────────────────────────────────────
-@router.post(
-    "/{process_id}/fields",
-    status_code=status.HTTP_201_CREATED,
-    summary="Add an extraction field to a process",
+def _build_doc_field_summary(doc: ProcessDocument) -> dict:
+    """Build field summary for one checklist document."""
+    fields = sorted(doc.extraction_fields, key=lambda f: f.sort_order)
+    active = [f for f in fields if f.is_active]
+    return {
+        "process_document_id": doc.id,
+        "document_name": doc.name,
+        "items": [_build_field_out(f) for f in fields],
+        "total": len(fields),
+        "active": len(active),
+        "fields_configured": len(active) > 0,
+    }
+
+
+# ── GET /v1/processes/{pid}/fields/summary ────────────────────────────────
+@router.get(
+    "/{process_id}/fields/summary",
+    summary="Get extraction field summary for a process",
     description=(
-        "Adds a field to the process extraction configuration. "
-        "Claude will extract this field from all documents uploaded "
-        "to this process. At least one active field must exist for "
-        "extraction to be enabled."
+        "Returns the field configuration status across all documents in "
+        "the process checklist. Use this to determine whether extraction "
+        "is enabled and which documents still need fields configured.\n\n"
+        "**extraction_enabled** is `true` if at least one document in the "
+        "process has at least one active extraction field. If `false`, "
+        "no AI classification will run for any document uploaded to this "
+        "process."
     ),
     responses={
-        201: {
-            "description": "Field added",
+        200: {
+            "description": "Field summary retrieved",
             "content": {
                 "application/json": {
                     "example": {
                         "success": True,
-                        "message": "Extraction field added successfully",
+                        "message": "Field summary retrieved successfully",
                         "data": {
-                            "id": "pef_1a2b3c4d5e6f",
                             "process_id": "proc_1a2b3c4d5e6f",
-                            "name": "Full Name",
-                            "is_active": True,
-                            "include_in_decision": True,
-                            "null_is_manual": True,
+                            "total_documents": 3,
+                            "documents_with_fields": 2,
+                            "documents_without_fields": 1,
+                            "extraction_enabled": True,
+                            "documents": [
+                                {
+                                    "process_document_id": 1,
+                                    "document_name": "National ID / NIN Slip",
+                                    "total": 5,
+                                    "active": 5,
+                                    "fields_configured": True,
+                                    "items": [],
+                                },
+                                {
+                                    "process_document_id": 2,
+                                    "document_name": "Bank Statement",
+                                    "total": 0,
+                                    "active": 0,
+                                    "fields_configured": False,
+                                    "items": [],
+                                },
+                            ],
                         },
                     }
                 }
             },
         },
         404: _404_process,
-        422: _422,
     },
 )
-def add_extraction_field(
+def get_fields_summary(
     process_id: str,
-    payload: ExtractionFieldCreate,
+    db: Session = db_dependency,
+):
+    process = _get_process_or_404(process_id, db)
+    docs = sorted(process.documents, key=lambda d: d.sort_order)
+
+    doc_summaries = [_build_doc_field_summary(d) for d in docs]
+    docs_with_fields = sum(1 for d in doc_summaries if d["fields_configured"])
+    extraction_enabled = docs_with_fields > 0
+
+    logger.info(
+        f"Field summary: process={process_id} "
+        f"docs={len(docs)} with_fields={docs_with_fields} "
+        f"extraction_enabled={extraction_enabled}"
+    )
+
+    return success_response(
+        data={
+            "process_id": process_id,
+            "total_documents": len(docs),
+            "documents_with_fields": docs_with_fields,
+            "documents_without_fields": len(docs) - docs_with_fields,
+            "extraction_enabled": extraction_enabled,
+            "documents": doc_summaries,
+        },
+        message="Field summary retrieved successfully",
+    )
+
+
+# ── POST /v1/processes/{pid}/documents/{did}/fields ───────────────────────
+@router.post(
+    "/{process_id}/documents/{doc_id}/fields",
+    status_code=status.HTTP_201_CREATED,
+    summary="Add an extraction field to a checklist document",
+    description=(
+        "Adds a field to a specific document in the process checklist. "
+        "When a submitted document is classified as this document type, "
+        "Claude will attempt to extract this field.\n\n"
+        "Fields are unique per checklist document — you cannot add the "
+        "same field name twice to the same document. The same field name "
+        "can appear on different documents (e.g. 'Full Name' on both "
+        "NIN Slip and Bank Statement)."
+    ),
+    responses={
+        201: {
+            "description": "Field added successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Extraction field added successfully",
+                        "data": {
+                            "id": "pdf_1a2b3c4d5e6f",
+                            "process_document_id": 1,
+                            "name": "NIN",
+                            "description": "11-digit National Identification Number",
+                            "is_active": True,
+                            "include_in_decision": True,
+                            "null_is_manual": True,
+                            "sort_order": 1,
+                            "created_at": "2026-05-20T10:00:00+00:00",
+                            "fields_configured": True,
+                            "active_count": 1,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_document,
+        409: _409,
+    },
+)
+def add_document_field(
+    process_id: str,
+    doc_id: int,
+    payload: DocumentFieldCreate,
     db: Session = db_dependency,
 ):
     _get_process_or_404(process_id, db)
+    checklist_doc = _get_checklist_doc_or_404(doc_id, process_id, db)
 
-    # Check for duplicate name within this process
+    # Duplicate check within this document
     existing = (
-        db.query(ProcessExtractionField)
+        db.query(ProcessDocumentField)
         .filter(
-            ProcessExtractionField.process_id == process_id,
-            ProcessExtractionField.name == payload.name,
+            ProcessDocumentField.process_document_id == doc_id,
+            ProcessDocumentField.name == payload.name,
         )
         .first()
     )
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_409_CONFLICT,
             detail=error_response(
-                f"Field '{payload.name}' already exists for this process",
+                f"Field '{payload.name}' already exists for " f"'{checklist_doc.name}'",
                 data={"existing_id": existing.id},
             ),
         )
 
-    field = ProcessExtractionField(
-        process_id=process_id,
+    field = ProcessDocumentField(
+        process_document_id=doc_id,
         name=payload.name,
         description=payload.description,
         include_in_decision=payload.include_in_decision,
@@ -215,119 +385,137 @@ def add_extraction_field(
     db.commit()
     db.refresh(field)
 
-    # Count active fields after addition
     active_count = (
-        db.query(ProcessExtractionField)
+        db.query(ProcessDocumentField)
         .filter(
-            ProcessExtractionField.process_id == process_id,
-            ProcessExtractionField.is_active.is_(True),
+            ProcessDocumentField.process_document_id == doc_id,
+            ProcessDocumentField.is_active.is_(True),
         )
         .count()
     )
 
     logger.info(
-        f"Extraction field added: {field.id} ({field.name}) "
-        f"for process {process_id} — {active_count} active fields"
+        f"Field added: {field.id} ('{field.name}') to document "
+        f"'{checklist_doc.name}' ({doc_id}) in process {process_id}"
     )
+
     return success_response(
-        data=_build_field_out(field),
+        data={
+            **_build_field_out(field),
+            "active_count": active_count,
+            "fields_configured": active_count > 0,
+        },
         message="Extraction field added successfully",
     )
 
 
-# ── GET /v1/processes/{id}/fields ─────────────────────────────────────────
+# ── GET /v1/processes/{pid}/documents/{did}/fields ────────────────────────
 @router.get(
-    "/{process_id}/fields",
-    summary="List extraction fields for a process",
+    "/{process_id}/documents/{doc_id}/fields",
+    summary="List extraction fields for a checklist document",
     description=(
-        "Returns all extraction fields for a process ordered by sort_order. "
-        "If extraction_enabled is false, no AI classification will run "
-        "for documents uploaded to this process."
+        "Returns all extraction fields configured for a specific document "
+        "in the process checklist, ordered by sort_order.\n\n"
+        "If `fields_configured` is `false`, this document will be "
+        "classified (type identified) but no fields will be extracted "
+        "from it."
     ),
     responses={
         200: {
-            "description": "Field list",
+            "description": "Fields retrieved",
             "content": {
                 "application/json": {
                     "example": {
                         "success": True,
                         "message": "Extraction fields retrieved successfully",
                         "data": {
+                            "process_document_id": 1,
+                            "document_name": "National ID / NIN Slip",
                             "items": [],
                             "total": 0,
                             "active": 0,
-                            "extraction_enabled": False,
+                            "fields_configured": False,
                         },
                     }
                 }
             },
         },
-        404: _404_process,
+        404: _404_document,
     },
 )
-def list_extraction_fields(
+def list_document_fields(
     process_id: str,
+    doc_id: int,
     db: Session = db_dependency,
 ):
     _get_process_or_404(process_id, db)
+    checklist_doc = _get_checklist_doc_or_404(doc_id, process_id, db)
 
     fields = (
-        db.query(ProcessExtractionField)
-        .filter(ProcessExtractionField.process_id == process_id)
-        .order_by(ProcessExtractionField.sort_order.asc())
+        db.query(ProcessDocumentField)
+        .filter(ProcessDocumentField.process_document_id == doc_id)
+        .order_by(ProcessDocumentField.sort_order.asc())
         .all()
     )
-
     active = [f for f in fields if f.is_active]
 
     return success_response(
         data={
+            "process_document_id": doc_id,
+            "document_name": checklist_doc.name,
             "items": [_build_field_out(f) for f in fields],
             "total": len(fields),
             "active": len(active),
-            "extraction_enabled": len(active) > 0,
+            "fields_configured": len(active) > 0,
         },
         message="Extraction fields retrieved successfully",
     )
 
 
-# ── GET /v1/processes/{id}/fields/{fid} ───────────────────────────────────
+# ── GET /v1/processes/{pid}/documents/{did}/fields/{fid} ──────────────────
 @router.get(
-    "/{process_id}/fields/{field_id}",
+    "/{process_id}/documents/{doc_id}/fields/{field_id}",
     summary="Get a single extraction field",
     responses={200: {}, 404: _404_field},
 )
-def get_extraction_field(
+def get_document_field(
     process_id: str,
+    doc_id: int,
     field_id: str,
     db: Session = db_dependency,
 ):
     _get_process_or_404(process_id, db)
-    field = _get_field_or_404(field_id, process_id, db)
+    _get_checklist_doc_or_404(doc_id, process_id, db)
+    field = _get_field_or_404(field_id, doc_id, db)
+
     return success_response(
         data=_build_field_out(field),
         message="Extraction field retrieved successfully",
     )
 
 
-# ── PATCH /v1/processes/{id}/fields/{fid} ────────────────────────────────
+# ── PATCH /v1/processes/{pid}/documents/{did}/fields/{fid} ────────────────
 @router.patch(
-    "/{process_id}/fields/{field_id}",
+    "/{process_id}/documents/{doc_id}/fields/{field_id}",
     summary="Update an extraction field",
     description=(
-        "Update field settings. Disabling all fields will disable "
-        "AI extraction for the entire process."
+        "Update field settings. All fields are optional — send only "
+        "what you want to change.\n\n"
+        "Disabling a field (`is_active: false`) removes it from Claude's "
+        "extraction prompt without deleting the configuration."
     ),
-    responses={200: {}, 404: _404_field, 422: _422},
+    responses={200: {}, 404: _404_field},
 )
-def update_extraction_field(
+def update_document_field(
     process_id: str,
+    doc_id: int,
     field_id: str,
-    payload: ExtractionFieldUpdate,
+    payload: DocumentFieldUpdate,
     db: Session = db_dependency,
 ):
     _get_process_or_404(process_id, db)
-    field = _get_field_or_404(field_id, process_id, db)
+    _get_checklist_doc_or_404(doc_id, process_id, db)
+    field = _get_field_or_404(field_id, doc_id, db)
 
     if payload.description is not None:
         field.description = payload.description
@@ -344,68 +532,75 @@ def update_extraction_field(
     db.refresh(field)
 
     active_count = (
-        db.query(ProcessExtractionField)
+        db.query(ProcessDocumentField)
         .filter(
-            ProcessExtractionField.process_id == process_id,
-            ProcessExtractionField.is_active.is_(True),
+            ProcessDocumentField.process_document_id == doc_id,
+            ProcessDocumentField.is_active.is_(True),
         )
         .count()
     )
 
     logger.info(
-        f"Extraction field updated: {field_id} ({field.name}) — "
-        f"process {process_id} now has {active_count} active fields"
+        f"Field updated: {field_id} ('{field.name}') in doc {doc_id} "
+        f"— {active_count} active fields remaining"
     )
+
     return success_response(
         data={
             **_build_field_out(field),
-            "extraction_enabled": active_count > 0,
+            "active_count": active_count,
+            "fields_configured": active_count > 0,
         },
         message="Extraction field updated successfully",
     )
 
 
-# ── DELETE /v1/processes/{id}/fields/{fid} ────────────────────────────────
+# ── DELETE /v1/processes/{pid}/documents/{did}/fields/{fid} ───────────────
 @router.delete(
-    "/{process_id}/fields/{field_id}",
+    "/{process_id}/documents/{doc_id}/fields/{field_id}",
     summary="Remove an extraction field",
     description=(
-        "Permanently removes a field from the process configuration. "
-        "This cannot be undone. If this was the last active field, "
-        "extraction will be disabled for this process."
+        "Permanently removes a field from a checklist document. "
+        "This cannot be undone.\n\n"
+        "Consider disabling (`is_active: false`) instead of deleting "
+        "if you may want to re-enable the field later."
     ),
     responses={200: {}, 404: _404_field},
 )
-def delete_extraction_field(
+def delete_document_field(
     process_id: str,
+    doc_id: int,
     field_id: str,
     db: Session = db_dependency,
 ):
     _get_process_or_404(process_id, db)
-    field = _get_field_or_404(field_id, process_id, db)
+    _get_checklist_doc_or_404(doc_id, process_id, db)
+    field = _get_field_or_404(field_id, doc_id, db)
 
     field_name = field.name
     db.delete(field)
     db.commit()
 
     active_count = (
-        db.query(ProcessExtractionField)
+        db.query(ProcessDocumentField)
         .filter(
-            ProcessExtractionField.process_id == process_id,
-            ProcessExtractionField.is_active.is_(True),
+            ProcessDocumentField.process_document_id == doc_id,
+            ProcessDocumentField.is_active.is_(True),
         )
         .count()
     )
 
     logger.info(
-        f"Extraction field removed: {field_id} ({field_name}) "
-        f"from process {process_id} — {active_count} active fields remaining"
+        f"Field deleted: {field_id} ('{field_name}') from doc {doc_id} "
+        f"in process {process_id}"
     )
+
     return success_response(
         data={
             "id": field_id,
             "name": field_name,
-            "extraction_enabled": active_count > 0,
+            "active_count": active_count,
+            "fields_configured": active_count > 0,
         },
         message="Extraction field removed successfully",
     )
