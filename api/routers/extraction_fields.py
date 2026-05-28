@@ -40,7 +40,11 @@ from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Process, ProcessDocument, ProcessDocumentField
 from schemas.base import error_response, success_response
-from schemas.extraction_field import DocumentFieldCreate, DocumentFieldUpdate
+from schemas.extraction_field import (
+    DocumentFieldCreate,
+    DocumentFieldUpdate,
+    ProcessRuleCreate,
+)
 
 logger = get_logger(__name__)
 
@@ -603,4 +607,205 @@ def delete_document_field(
             "fields_configured": active_count > 0,
         },
         message="Extraction field removed successfully",
+    )
+
+
+# ── GET /v1/processes/{pid}/rules ─────────────────────────────────────────
+@router.get(
+    "/{process_id}/rules",
+    summary="List validation rules for a process",
+    description=(
+        "Returns all validation rules that apply to this process — "
+        "both global rules (process_id is null) and rules scoped "
+        "specifically to this process.\n\n"
+        "Use this endpoint to see the complete set of rules that "
+        "will run when this process's submissions are validated."
+    ),
+    responses={
+        200: {
+            "description": "Rules retrieved",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Validation rules retrieved successfully",
+                        "data": {
+                            "items": [],
+                            "total": 0,
+                            "global_count": 0,
+                            "process_count": 0,
+                            "enabled": 0,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_process,
+    },
+)
+def list_process_rules(
+    process_id: str,
+    db: Session = db_dependency,
+):
+    from sqlalchemy import or_
+
+    from db.models import ValidationRule
+
+    _get_process_or_404(process_id, db)
+
+    rules = (
+        db.query(ValidationRule)
+        .filter(
+            or_(
+                ValidationRule.process_id.is_(None),
+                ValidationRule.process_id == process_id,
+            )
+        )
+        .order_by(ValidationRule.created_at.asc())
+        .all()
+    )
+
+    global_count = sum(1 for r in rules if r.process_id is None)
+    process_count = sum(1 for r in rules if r.process_id is not None)
+    enabled = sum(1 for r in rules if r.is_enabled)
+
+    return success_response(
+        data={
+            "items": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "rule_type": r.rule_type,
+                    "field": r.field,
+                    "check": r.check,
+                    "pattern": r.pattern,
+                    "severity": r.severity,
+                    "is_enabled": r.is_enabled,
+                    "process_id": r.process_id,
+                    "scope": "global" if r.process_id is None else "process",
+                    "created_at": (r.created_at.isoformat() if r.created_at else None),
+                }
+                for r in rules
+            ],
+            "total": len(rules),
+            "global_count": global_count,
+            "process_count": process_count,
+            "enabled": enabled,
+        },
+        message="Validation rules retrieved successfully",
+    )
+
+
+# ── POST /v1/processes/{pid}/rules ────────────────────────────────────────
+@router.post(
+    "/{process_id}/rules",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a process-scoped validation rule",
+    description=(
+        "Creates a validation rule scoped to this process only. "
+        "This rule will run in addition to global rules when validating "
+        "submissions under this process.\n\n"
+        "To create a global rule that applies to all processes, use "
+        "`POST /v1/config/rules` without a `process_id`."
+    ),
+    responses={
+        201: {
+            "description": "Rule created",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Validation rule created successfully",
+                        "data": {
+                            "id": "rule_abc123def456",
+                            "name": "Property value required",
+                            "rule_type": "required",
+                            "field": "Property Value",
+                            "scope": "process",
+                            "process_id": "proc_1a2b3c4d5e6f",
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_process,
+        422: {
+            "description": "Duplicate rule name",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": "A rule named 'Property value required' already exists",
+                        "data": None,
+                    }
+                }
+            },
+        },
+    },
+)
+def create_process_rule(
+    process_id: str,
+    payload: "ProcessRuleCreate",
+    db: Session = db_dependency,
+):
+    from sqlalchemy import or_
+
+    from db.models import ValidationRule
+
+    _get_process_or_404(process_id, db)
+
+    # Duplicate check within this process scope
+    existing = (
+        db.query(ValidationRule)
+        .filter(
+            ValidationRule.name.ilike(payload.name),
+            or_(
+                ValidationRule.process_id == process_id,
+                ValidationRule.process_id.is_(None),
+            ),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response(
+                f"A rule named '{payload.name}' already exists",
+                data={"existing_id": existing.id},
+            ),
+        )
+
+    rule = ValidationRule(
+        name=payload.name,
+        rule_type=payload.rule_type,
+        field=payload.field,
+        severity=payload.severity,
+        pattern=payload.pattern,
+        check=payload.check,
+        process_id=process_id,
+        is_enabled=True,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+
+    logger.info(
+        f"Process rule created: {rule.id} ({rule.name}) " f"for process {process_id}"
+    )
+
+    return success_response(
+        data={
+            "id": rule.id,
+            "name": rule.name,
+            "rule_type": rule.rule_type,
+            "field": rule.field,
+            "check": rule.check,
+            "pattern": rule.pattern,
+            "severity": rule.severity,
+            "is_enabled": rule.is_enabled,
+            "process_id": rule.process_id,
+            "scope": "process",
+            "created_at": (rule.created_at.isoformat() if rule.created_at else None),
+        },
+        message="Validation rule created successfully",
     )

@@ -178,7 +178,16 @@ def _render_rules():
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([4, 2, 2, 2])
             with col1:
-                st.markdown(f"{enabled_icon} **{rule['name']}**")
+                scope_badge = (
+                    "🌐 Global"
+                    if rule.get("scope") == "global"
+                    else "🏠 Process"
+                )
+                st.markdown(
+                    f"{enabled_icon} **{rule['name']}** "
+                    f"<small>{scope_badge}</small>",
+                    unsafe_allow_html=True,
+                )
                 details = []
                 if rule.get("check"):
                     details.append(f"check: `{rule['check']}`")

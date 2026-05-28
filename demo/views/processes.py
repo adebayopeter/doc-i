@@ -373,6 +373,7 @@ def _render_edit_form(proc: dict):
 
         # ── Extraction fields ──────────────────────────────────────────
         _render_extraction_fields(proc["process_id"])
+        _render_validation_rules(proc["process_id"])
 
 
 def _render_extraction_fields(process_id: str):
@@ -555,3 +556,161 @@ def _render_extraction_fields(process_id: str):
                         st.rerun()
                     else:
                         st.error(f"❌ {result.get('message', 'Failed')}")
+
+
+def _render_validation_rules(process_id: str):
+    """Renders process-scoped validation rules section."""
+    st.divider()
+    st.subheader("✅ Validation Rules")
+    st.caption(
+        "Rules added here run only for this process, in addition to "
+        "the global rules in Config. Use process rules for workflow-specific "
+        "checks — e.g. Property Value required for RSA Mortgage only."
+    )
+
+    result = api_get(f"/v1/processes/{process_id}/rules")
+    if not result.get("success"):
+        st.error("Could not load validation rules.")
+        return
+
+    data = result.get("data", {})
+    rules = data.get("items", [])
+    global_count = data.get("global_count", 0)
+    process_count = data.get("process_count", 0)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Rules", data.get("total", 0))
+    col2.metric("Global", global_count)
+    col3.metric("This Process Only", process_count)
+
+    st.divider()
+
+    # Show process-scoped rules with delete option
+    process_rules = [r for r in rules if r["scope"] == "process"]
+    global_rules = [r for r in rules if r["scope"] == "global"]
+
+    if process_rules:
+        st.markdown("**Process-specific rules:**")
+        for rule in process_rules:
+            enabled_icon = "✅" if rule["is_enabled"] else "⏸️"
+            sev_icon = "🔴" if rule["severity"] == "error" else "🟡"
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([5, 2, 2])
+                with c1:
+                    st.markdown(f"{enabled_icon} **{rule['name']}**")
+                    details = []
+                    if rule.get("check"):
+                        details.append(f"check: `{rule['check']}`")
+                    if rule.get("pattern"):
+                        details.append(f"pattern: `{rule['pattern']}`")
+                    if details:
+                        st.caption(" · ".join(details))
+                    st.caption(
+                        f"`{rule['id']}` · {sev_icon} {rule['severity']} "
+                        f"· {rule['rule_type']} · field: {rule['field']}"
+                    )
+                with c2:
+                    toggle_label = (
+                        "Disable" if rule["is_enabled"] else "Enable"
+                    )
+                    if st.button(
+                        toggle_label,
+                        key=f"rule_toggle_{rule['id']}",
+                        use_container_width=True,
+                    ):
+                        requests.patch(
+                            f"{API_BASE}/v1/config/rules/{rule['id']}",
+                            headers=HEADERS,
+                            json={"enabled": not rule["is_enabled"]},
+                            timeout=10,
+                        )
+                        st.rerun()
+                with c3:
+                    if st.button(
+                        "🗑️ Delete",
+                        key=f"rule_del_{rule['id']}",
+                        use_container_width=True,
+                    ):
+                        requests.delete(
+                            f"{API_BASE}/v1/config/rules/{rule['id']}",
+                            headers=HEADERS,
+                            timeout=10,
+                        )
+                        st.rerun()
+
+    if global_rules:
+        with st.expander(
+            f"📋 {len(global_rules)} global rules also apply to this process",
+            expanded=False,
+        ):
+            for rule in global_rules:
+                enabled_icon = "✅" if rule["is_enabled"] else "⏸️"
+                st.markdown(
+                    f"{enabled_icon} **{rule['name']}** "
+                    f"[{rule['rule_type']}] — `{rule['field']}`"
+                )
+            st.caption(
+                "To manage global rules, go to ⚙️ Config → Validation Rules."
+            )
+
+    # Add new process-scoped rule
+    st.markdown("**Add a rule for this process:**")
+    with st.form(key=f"add_rule_{process_id}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            rule_name = st.text_input(
+                "Rule Name *",
+                placeholder="e.g. Property value required",
+            )
+            rule_field = st.text_input(
+                "Field *",
+                placeholder="e.g. Property Value",
+            )
+            rule_type = st.selectbox(
+                "Rule Type *",
+                ["required", "format", "logical", "cross_doc"],
+            )
+        with col2:
+            rule_severity = st.selectbox("Severity", ["error", "warning"])
+            rule_pattern = st.text_input(
+                "Pattern (format rules only)",
+                placeholder=r"e.g. ^\d{11}$",
+            )
+            rule_check = st.selectbox(
+                "Check (logical rules only)",
+                ["", "not_future", "min_age_18", "not_expired"],
+            )
+
+        add_rule_submit = st.form_submit_button(
+            "➕ Add Rule",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if add_rule_submit:
+        if not rule_name or not rule_field:
+            st.error("Rule name and field are required.")
+        elif rule_type == "format" and not rule_pattern:
+            st.error("Pattern is required for format rules.")
+        elif rule_type == "logical" and not rule_check:
+            st.error("Check is required for logical rules.")
+        else:
+            resp = requests.post(
+                f"{API_BASE}/v1/processes/{process_id}/rules",
+                headers=HEADERS,
+                json={
+                    "name": rule_name,
+                    "rule_type": rule_type,
+                    "field": rule_field,
+                    "severity": rule_severity,
+                    "pattern": rule_pattern or None,
+                    "check": rule_check or None,
+                },
+                timeout=10,
+            )
+            result = resp.json()
+            if result.get("success"):
+                st.success(f"✅ Rule **{rule_name}** added.")
+                st.rerun()
+            else:
+                st.error(f"❌ {result.get('message', 'Failed')}")

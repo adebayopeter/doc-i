@@ -76,6 +76,14 @@ class ValidationRuleCreate(BaseModel):
     severity: str = Field(default="error", pattern="^(error|warning)$")
     pattern: Optional[str] = Field(default=None, max_length=500)
     check: Optional[str] = Field(default=None, max_length=100)
+    process_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "If set, this rule only runs for submissions under this process. "
+            "If null, the rule runs globally for all processes."
+        ),
+        examples=["proc_1a2b3c4d5e6f"],
+    )
 
 
 # ── Response schemas ───────────────────────────────────────────────────────
@@ -88,6 +96,8 @@ class RuleOut(BaseModel):
     pattern: Optional[str]
     severity: str
     is_enabled: bool
+    process_id: Optional[str]
+    scope: str  # "global" or "process"
     created_at: datetime
 
     model_config = {
@@ -102,6 +112,8 @@ class RuleOut(BaseModel):
                 "pattern": None,
                 "severity": "error",
                 "is_enabled": True,
+                "process_id": None,
+                "scope": "global",
                 "created_at": "2025-05-20T10:00:00",
             }
         },

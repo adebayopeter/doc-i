@@ -62,6 +62,12 @@ class Process(Base):
         cascade="all, delete-orphan",
         order_by="ProcessExtractionField.sort_order",
     )
+    validation_rules = relationship(
+        "ValidationRule",
+        back_populates="process",
+        cascade="all, delete-orphan",
+        foreign_keys="ValidationRule.process_id",
+    )
 
     def __repr__(self):
         return f"<Process id={self.id} name={self.name}>"
@@ -277,13 +283,25 @@ class SubmissionDocument(Base):
 # 5. ValidationRule
 class ValidationRule(Base):
     """
-    Configurable validation rule — stored in the database so rules
-    can be toggled on/off without redeploying the application.
+    Configurable validation rule.
+
+    process_id is nullable:
+      - NULL  → global rule, runs on every process
+      - set   → scoped to that process only
+
+    When validating a submission, both global rules and
+    process-specific rules are loaded and run together.
     """
 
     __tablename__ = "validation_rules"
 
     id = Column(String, primary_key=True, default=lambda: _gen_id("rule"))
+    process_id = Column(
+        String,
+        ForeignKey("processes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name = Column(String(200), nullable=False)
 
     # rule_type values: required | format | logical | cross_doc
@@ -303,6 +321,13 @@ class ValidationRule(Base):
 
     is_enabled = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    # relationships
+    process = relationship(
+        "Process",
+        back_populates="validation_rules",
+        foreign_keys=[process_id],
+    )
 
     def __repr__(self):
         return f"<ValidationRule id={self.id} name={self.name}>"

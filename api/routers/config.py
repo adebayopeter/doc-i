@@ -13,6 +13,8 @@ Endpoints:
     PUT    /v1/config/thresholds         Update confidence thresholds
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -118,15 +120,20 @@ def _build_rule_out(rule: ValidationRule) -> dict:
     "/rules",
     summary="List all validation rules",
     description=(
-        "Returns all validation rules with their current enabled state. "
-        "Rules are applied during validation analysis. "
-        "Disabled rules return status `skip` and do not affect the "
-        "validation summary. \n\n"
+        "Returns validation rules with their current enabled state.\n\n"
+        "**Filtering:**\n"
+        "- `?scope=global` — only global rules (no process_id)\n"
+        "- `?scope=process` — only process-scoped rules\n"
+        "- `?process_id=proc_xxx` — rules for a specific process "
+        "(includes both global rules and rules scoped to that process)\n\n"
         "**Rule types:**\n"
         "- `required` — field must be present and non-null\n"
         "- `format` — value must match a regex pattern\n"
         "- `logical` — date/age/expiry check\n"
-        "- `cross_doc` — value must be consistent across documents"
+        "- `cross_doc` — value must be consistent across documents\n\n"
+        "**Scope:**\n"
+        "- `global` — runs on every process (process_id is null)\n"
+        "- `process` — runs only for the specific process it is tied to"
     ),
     response_description="Rules retrieved successfully",
     responses={
@@ -176,6 +183,8 @@ def _build_rule_out(rule: ValidationRule) -> dict:
                             "total": 12,
                             "enabled": 11,
                             "disabled": 1,
+                            "global_count": 10,
+                            "process_count": 2,
                         },
                     }
                 }
@@ -183,11 +192,37 @@ def _build_rule_out(rule: ValidationRule) -> dict:
         },
     },
 )
-def list_rules(db: Session = db_dependency):
-    rules = db.query(ValidationRule).order_by(ValidationRule.created_at.asc()).all()
-    enabled = len([r for r in rules if r.is_enabled])
+def list_rules(
+    process_id: Optional[str] = None,
+    scope: Optional[str] = None,
+    db: Session = db_dependency,
+):
+    from sqlalchemy import or_
 
-    logger.info(f"Listed {len(rules)} validation rules ({enabled} enabled)")
+    query = db.query(ValidationRule)
+
+    if process_id:
+        # Return global rules + rules scoped to this process
+        query = query.filter(
+            or_(
+                ValidationRule.process_id.is_(None),
+                ValidationRule.process_id == process_id,
+            )
+        )
+    elif scope == "global":
+        query = query.filter(ValidationRule.process_id.is_(None))
+    elif scope == "process":
+        query = query.filter(ValidationRule.process_id.isnot(None))
+
+    rules = query.order_by(ValidationRule.created_at.asc()).all()
+    enabled = len([r for r in rules if r.is_enabled])
+    global_count = len([r for r in rules if r.process_id is None])
+    process_count = len([r for r in rules if r.process_id is not None])
+
+    logger.info(
+        f"Listed {len(rules)} rules "
+        f"(global={global_count} process={process_count} enabled={enabled})"
+    )
 
     return success_response(
         data={
@@ -195,6 +230,8 @@ def list_rules(db: Session = db_dependency):
             "total": len(rules),
             "enabled": enabled,
             "disabled": len(rules) - enabled,
+            "global_count": global_count,
+            "process_count": process_count,
         },
         message="Validation rules retrieved successfully",
     )
@@ -233,10 +270,19 @@ def create_rule(
     payload: ValidationRuleCreate,
     db: Session = db_dependency,
 ):
-    # Check for duplicate name
-    existing = (
-        db.query(ValidationRule).filter(ValidationRule.name.ilike(payload.name)).first()
-    )
+    from sqlalchemy import or_
+
+    # Check for duplicate name within same scope
+    query = db.query(ValidationRule).filter(ValidationRule.name.ilike(payload.name))
+    if payload.process_id:
+        query = query.filter(
+            or_(
+                ValidationRule.process_id == payload.process_id,
+                ValidationRule.process_id.is_(None),
+            )
+        )
+    existing = query.first()
+
     if existing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -246,6 +292,24 @@ def create_rule(
             ),
         )
 
+    # Validate process exists if process_id provided
+    if payload.process_id:
+        from db.models import Process
+
+        process = (
+            db.query(Process)
+            .filter(
+                Process.id == payload.process_id,
+                Process.is_active.is_(True),
+            )
+            .first()
+        )
+        if not process:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(f"Process '{payload.process_id}' not found"),
+            )
+
     rule = ValidationRule(
         name=payload.name,
         rule_type=payload.rule_type,
@@ -253,13 +317,16 @@ def create_rule(
         severity=payload.severity,
         pattern=payload.pattern,
         check=payload.check,
+        process_id=payload.process_id,
         is_enabled=True,
     )
     db.add(rule)
     db.commit()
     db.refresh(rule)
 
-    logger.info(f"Validation rule created: {rule.id} ({rule.name})")
+    scope = "global" if not payload.process_id else f"process {payload.process_id}"
+    logger.info(f"Validation rule created: {rule.id} ({rule.name}) scope={scope}")
+
     return success_response(
         data=_build_rule_out(rule),
         message="Validation rule created successfully",

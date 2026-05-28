@@ -324,10 +324,23 @@ def get_validation(
     submission_id: str,
     db: Session = db_dependency,
 ):
-    _get_submission_or_404(submission_id, db)
+    from sqlalchemy import or_
+
+    submission = _get_submission_or_404(submission_id, db)
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
-    rules = db.query(ValidationRule).all()
+
+    # Load global rules + rules scoped to this process
+    rules = (
+        db.query(ValidationRule)
+        .filter(
+            or_(
+                ValidationRule.process_id.is_(None),
+                ValidationRule.process_id == submission.process_id,
+            )
+        )
+        .all()
+    )
     results = run_rules(record, rules)
 
     summary = {
@@ -490,10 +503,22 @@ def get_decision(
     submission_id: str,
     db: Session = db_dependency,
 ):
-    _get_submission_or_404(submission_id, db)
+    from sqlalchemy import or_
+
+    submission = _get_submission_or_404(submission_id, db)
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
-    rules = db.query(ValidationRule).all()
+
+    rules = (
+        db.query(ValidationRule)
+        .filter(
+            or_(
+                ValidationRule.process_id.is_(None),
+                ValidationRule.process_id == submission.process_id,
+            )
+        )
+        .all()
+    )
     validation_results = run_rules(record, rules)
 
     field_configs: dict = {}
