@@ -975,11 +975,10 @@ def get_process_thresholds(
 )
 def set_process_thresholds(
     process_id: str,
-    payload: "ProcessThresholdUpdate",
+    payload: ProcessThresholdUpdate,
     db: Session = db_dependency,
 ):
     from db.models import ProcessThreshold
-    from schemas.config import ProcessThresholdUpdate
 
     _get_process_or_404(process_id, db)
 

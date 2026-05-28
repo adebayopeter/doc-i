@@ -20,14 +20,9 @@ from sqlalchemy.orm import Session
 
 from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
-from db.models import ValidationRule
+from db.models import ProcessThreshold, ValidationRule
 from schemas.base import error_response, success_response
-from schemas.config import (
-    ProcessThresholdUpdate,
-    RuleUpdate,
-    ThresholdUpdate,
-    ValidationRuleCreate,
-)
+from schemas.config import RuleUpdate, ThresholdUpdate, ValidationRuleCreate
 from services.decisioning import DEFAULT_THRESHOLDS
 
 logger = get_logger(__name__)
@@ -87,7 +82,6 @@ def get_process_thresholds(process_id: str, db) -> dict:
 
 def _ensure_global_threshold(db) -> "ProcessThreshold":
     """Get or create the global threshold row."""
-    from db.models import ProcessThreshold
 
     row = (
         db.query(ProcessThreshold).filter(ProcessThreshold.process_id.is_(None)).first()

@@ -504,6 +504,8 @@ def get_decision(
 ):
     from sqlalchemy import or_
 
+    from routers.config import get_process_thresholds
+
     submission = _get_submission_or_404(submission_id, db)
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
