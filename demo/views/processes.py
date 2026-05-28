@@ -421,10 +421,9 @@ def _render_extraction_fields(process_id: str):
             f"{active_count} field(s)" if fields_configured else "no fields"
         )
 
-        with st.expander(
-            f"{status_icon} **{doc_name}** — {status_text}",
-            expanded=not fields_configured,
-        ):
+        with st.container(border=True):
+            st.markdown(f"{status_icon} **{doc_name}** — {status_text}")
+
             # Show existing fields for this document
             existing_fields = doc_data.get("items", [])
             if existing_fields:
@@ -639,10 +638,10 @@ def _render_validation_rules(process_id: str):
                         st.rerun()
 
     if global_rules:
-        with st.expander(
-            f"📋 {len(global_rules)} global rules also apply to this process",
-            expanded=False,
-        ):
+        with st.container(border=True):
+            st.markdown(
+                f"📋 **{len(global_rules)} global rules also apply to this process**"
+            )
             for rule in global_rules:
                 enabled_icon = "✅" if rule["is_enabled"] else "⏸️"
                 st.markdown(

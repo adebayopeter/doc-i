@@ -111,6 +111,8 @@ def _build_rule_out(rule: ValidationRule) -> dict:
         "pattern": rule.pattern,
         "severity": rule.severity,
         "is_enabled": rule.is_enabled,
+        "process_id": rule.process_id,
+        "scope": "global" if rule.process_id is None else "process",
         "created_at": (rule.created_at.isoformat() if rule.created_at else None),
     }
 

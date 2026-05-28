@@ -29,6 +29,13 @@ def render():
 
 def _render_rules():
     with st.expander("➕ Create New Validation Rule", expanded=False):
+
+        # Load processes for the dropdown
+        proc_result = api_get("/v1/processes")
+        processes = proc_result.get("data", {}).get("items", [])
+        process_options = {"🌐 Global (applies to all processes)": None}
+        process_options.update({p["name"]: p["process_id"] for p in processes})
+
         with st.form("create_rule"):
             col1, col2 = st.columns(2)
             with col1:
@@ -51,7 +58,6 @@ def _render_rules():
                         "cross_doc — value must match across documents"
                     ),
                 )
-            with col2:
                 rule_severity = st.selectbox(
                     "Severity",
                     ["error", "warning"],
@@ -60,6 +66,7 @@ def _render_rules():
                         "warning — flagged but does not block"
                     ),
                 )
+            with col2:
                 rule_pattern = st.text_input(
                     "Pattern (format rules only)",
                     placeholder=r"e.g. ^\d{11}$",
@@ -70,6 +77,18 @@ def _render_rules():
                     ["", "not_future", "min_age_18", "not_expired"],
                     help="Which logical check to run on the field value",
                 )
+                # Process scope selector
+                selected_process_name = st.selectbox(
+                    "Scope",
+                    options=list(process_options.keys()),
+                    index=0,
+                    help=(
+                        "Global — runs on every process. "
+                        "Choose a process to restrict this rule to that "
+                        "workflow only."
+                    ),
+                )
+                selected_process_id = process_options[selected_process_name]
 
             # Show contextual help based on rule type
             if rule_type == "required":
@@ -121,6 +140,7 @@ def _render_rules():
                     "severity": rule_severity,
                     "pattern": rule_pattern or None,
                     "check": rule_check or None,
+                    "process_id": selected_process_id,
                 }
 
                 response = requests.post(
@@ -131,8 +151,13 @@ def _render_rules():
                 )
                 result_data = response.json()
                 if result_data.get("success"):
+                    scope = (
+                        "globally"
+                        if not selected_process_id
+                        else f"for {selected_process_name}"
+                    )
                     st.success(
-                        f"✅ Rule **{rule_name}** created successfully."
+                        f"✅ Rule **{rule_name}** created {scope}."
                     )
                     st.rerun()
                 else:
