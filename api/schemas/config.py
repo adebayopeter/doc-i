@@ -86,7 +86,71 @@ class ValidationRuleCreate(BaseModel):
     )
 
 
+class ProcessThresholdUpdate(BaseModel):
+    """
+    Set or update confidence thresholds for a specific process.
+    auto_above must be greater than manual_below.
+    """
+
+    auto_above: int = Field(
+        ...,
+        ge=51,
+        le=99,
+        description=(
+            "Fields at or above this confidence are auto-processed. "
+            "Must be between 51 and 99."
+        ),
+        examples=[90],
+    )
+    manual_below: int = Field(
+        ...,
+        ge=1,
+        le=79,
+        description=(
+            "Fields below this confidence require manual input. "
+            "Must be between 1 and 79."
+        ),
+        examples=[65],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "auto_above": 90,
+                "manual_below": 65,
+            }
+        }
+    }
+
+
 # ── Response schemas ───────────────────────────────────────────────────────
+class ThresholdOut(BaseModel):
+    """Threshold response including scope information."""
+
+    auto_above: int
+    manual_below: int
+    scope: str  # "global" or "process"
+    process_id: Optional[str]
+    is_override: bool = Field(
+        description=(
+            "True if this process has its own threshold configuration. "
+            "False if it is using the global default."
+        )
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "auto_above": 90,
+                "manual_below": 65,
+                "scope": "process",
+                "process_id": "proc_1a2b3c4d5e6f",
+                "is_override": True,
+            }
+        }
+    }
+
+
 class RuleOut(BaseModel):
     id: str
     name: str

@@ -68,6 +68,12 @@ class Process(Base):
         cascade="all, delete-orphan",
         foreign_keys="ValidationRule.process_id",
     )
+    thresholds = relationship(
+        "ProcessThreshold",
+        back_populates="process",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<Process id={self.id} name={self.name}>"
@@ -333,7 +339,52 @@ class ValidationRule(Base):
         return f"<ValidationRule id={self.id} name={self.name}>"
 
 
-# 6. DocumentCategory
+# 6. ProcessThreshold
+class ProcessThreshold(Base):
+    """
+    Confidence thresholds for routing decisions.
+
+    process_id is nullable:
+      - NULL  → global default, applies to all processes without
+                their own threshold configuration
+      - set   → overrides global for this specific process
+
+    Only one row per process_id is allowed (UniqueConstraint).
+    The global row (process_id=NULL) is seeded on startup.
+
+    auto_above:   fields at or above this confidence → auto-process
+    manual_below: fields below this confidence → manual input required
+    review range: everything between manual_below and auto_above
+    """
+
+    __tablename__ = "process_thresholds"
+
+    id = Column(String, primary_key=True, default=lambda: _gen_id("thr"))
+    process_id = Column(
+        String,
+        ForeignKey("processes.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    auto_above = Column(Integer, default=85, nullable=False)
+    manual_below = Column(Integer, default=60, nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    # relationships
+    process = relationship("Process", back_populates="thresholds")
+
+    def __repr__(self):
+        scope = f"process={self.process_id}" if self.process_id else "global"
+        return (
+            f"<ProcessThreshold {scope} "
+            f"auto≥{self.auto_above}% manual<{self.manual_below}%>"
+        )
+
+
+# 7. DocumentCategory
 class DocumentCategory(Base):
     """
     Managed list of document categories.
@@ -349,7 +400,7 @@ class DocumentCategory(Base):
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
 
-# 7. AuditLog
+# 8. AuditLog
 class AuditLog(Base):
     """
     Immutable record of every significant event on a submission.

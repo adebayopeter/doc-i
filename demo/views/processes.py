@@ -374,6 +374,7 @@ def _render_edit_form(proc: dict):
         # ── Extraction fields ──────────────────────────────────────────
         _render_extraction_fields(proc["process_id"])
         _render_validation_rules(proc["process_id"])
+        _render_thresholds(proc["process_id"])
 
 
 def _render_extraction_fields(process_id: str):
@@ -713,3 +714,110 @@ def _render_validation_rules(process_id: str):
                 st.rerun()
             else:
                 st.error(f"❌ {result.get('message', 'Failed')}")
+
+
+def _render_thresholds(process_id: str):
+    """Renders process-specific confidence threshold configuration."""
+    st.divider()
+    st.subheader("🎚️ Confidence Thresholds")
+    st.caption(
+        "Override the global confidence thresholds for this process. "
+        "Leave as global default unless this process needs stricter "
+        "or more lenient routing."
+    )
+
+    result = api_get(f"/v1/processes/{process_id}/thresholds")
+    if not result.get("success"):
+        st.error("Could not load threshold configuration.")
+        return
+
+    data = result.get("data", {})
+    is_override = data.get("is_override", False)
+    auto_above = data.get("auto_above", 85)
+    manual_below = data.get("manual_below", 60)
+
+    if is_override:
+        st.info(
+            f"🔧 **Custom thresholds active** — "
+            f"auto ≥ {auto_above}% · manual < {manual_below}% · "
+            f"review is {manual_below}%–{auto_above}%"
+        )
+    else:
+        st.info(
+            f"🌐 **Using global default** — "
+            f"auto ≥ {auto_above}% · manual < {manual_below}%. "
+            f"Set an override below to customise for this process."
+        )
+
+    with st.form(key=f"threshold_form_{process_id}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_auto = st.slider(
+                "Auto-process above (%)",
+                min_value=51,
+                max_value=99,
+                value=auto_above,
+                help="Fields at or above this confidence are auto-processed",
+            )
+        with col2:
+            new_manual = st.slider(
+                "Manual input below (%)",
+                min_value=1,
+                max_value=79,
+                value=manual_below,
+                help="Fields below this confidence require manual input",
+            )
+
+        if new_auto <= new_manual:
+            st.error("auto-process threshold must be greater than manual threshold")
+            disabled = True
+        else:
+            st.caption(
+                f"Review range: {new_manual}% – {new_auto}%"
+            )
+            disabled = False
+
+        col_save, col_reset = st.columns(2)
+        with col_save:
+            save = st.form_submit_button(
+                "💾 Save Override",
+                type="primary",
+                use_container_width=True,
+                disabled=disabled,
+            )
+        with col_reset:
+            reset = st.form_submit_button(
+                "🔄 Revert to Global",
+                use_container_width=True,
+                disabled=not is_override,
+            )
+
+    if save and not disabled:
+        resp = requests.put(
+            f"{API_BASE}/v1/processes/{process_id}/thresholds",
+            headers=HEADERS,
+            json={"auto_above": new_auto, "manual_below": new_manual},
+            timeout=10,
+        )
+        result = resp.json()
+        if result.get("success"):
+            st.success(
+                f"✅ Thresholds set: auto ≥ {new_auto}% · "
+                f"manual < {new_manual}%"
+            )
+            st.rerun()
+        else:
+            st.error(f"❌ {result.get('message', 'Failed')}")
+
+    if reset:
+        resp = requests.delete(
+            f"{API_BASE}/v1/processes/{process_id}/thresholds",
+            headers=HEADERS,
+            timeout=10,
+        )
+        result = resp.json()
+        if result.get("success"):
+            st.success("✅ Reverted to global defaults.")
+            st.rerun()
+        else:
+            st.error(f"❌ {result.get('message', 'Failed')}")

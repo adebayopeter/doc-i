@@ -30,7 +30,6 @@ from db.models import (
     SubmissionDocument,
     ValidationRule,
 )
-from routers.config import get_current_thresholds
 from schemas.base import error_response, success_response
 from services.aggregation import build_unified_record
 from services.decisioning import compute_decision
@@ -542,10 +541,12 @@ def get_decision(
                     "null_is_manual": f.null_is_manual,
                 }
 
+    thresholds = get_process_thresholds(submission.process_id, db)
+
     decision = compute_decision(
         record,
         validation_results,
-        thresholds=get_current_thresholds(),
+        thresholds=thresholds,
         field_configs=field_configs if field_configs else None,
     )
 

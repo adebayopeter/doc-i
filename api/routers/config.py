@@ -22,7 +22,12 @@ from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import ValidationRule
 from schemas.base import error_response, success_response
-from schemas.config import RuleUpdate, ThresholdUpdate, ValidationRuleCreate
+from schemas.config import (
+    ProcessThresholdUpdate,
+    RuleUpdate,
+    ThresholdUpdate,
+    ValidationRuleCreate,
+)
 from services.decisioning import DEFAULT_THRESHOLDS
 
 logger = get_logger(__name__)
@@ -31,15 +36,72 @@ logger = get_logger(__name__)
 db_dependency = Depends(get_db)
 auth_dependency = Depends(verify_api_key)
 
-# ── In-memory threshold store ──────────────────────────────────────────────
-# For MVP, thresholds are stored in memory.
-# In production, persist to a config table in PostgreSQL.
-_current_thresholds = dict(DEFAULT_THRESHOLDS)
+# ── Threshold helpers ──────────────────────────────────────────────────────
+_GLOBAL_THRESHOLD_FALLBACK = dict(DEFAULT_THRESHOLDS)
 
 
-def get_current_thresholds() -> dict:
-    """Returns the live threshold dict — called at request time."""
-    return _current_thresholds
+def get_current_thresholds(db=None) -> dict:
+    """
+    Returns the global threshold dict.
+    If db is provided, reads from DB. Otherwise uses in-memory fallback.
+    Called at request time from analysis router.
+    """
+    if db is None:
+        return _GLOBAL_THRESHOLD_FALLBACK
+
+    from db.models import ProcessThreshold
+
+    global_row = (
+        db.query(ProcessThreshold).filter(ProcessThreshold.process_id.is_(None)).first()
+    )
+    if global_row:
+        return {
+            "autoAbove": global_row.auto_above,
+            "manualBelow": global_row.manual_below,
+        }
+    return _GLOBAL_THRESHOLD_FALLBACK
+
+
+def get_process_thresholds(process_id: str, db) -> dict:
+    """
+    Returns thresholds for a specific process.
+    Falls back to global if no process-specific threshold is set.
+    """
+    from db.models import ProcessThreshold
+
+    # Try process-specific first
+    process_row = (
+        db.query(ProcessThreshold)
+        .filter(ProcessThreshold.process_id == process_id)
+        .first()
+    )
+    if process_row:
+        return {
+            "autoAbove": process_row.auto_above,
+            "manualBelow": process_row.manual_below,
+        }
+
+    # Fall back to global
+    return get_current_thresholds(db)
+
+
+def _ensure_global_threshold(db) -> "ProcessThreshold":
+    """Get or create the global threshold row."""
+    from db.models import ProcessThreshold
+
+    row = (
+        db.query(ProcessThreshold).filter(ProcessThreshold.process_id.is_(None)).first()
+    )
+    if not row:
+        row = ProcessThreshold(
+            process_id=None,
+            auto_above=DEFAULT_THRESHOLDS["autoAbove"],
+            manual_below=DEFAULT_THRESHOLDS["manualBelow"],
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
 
 
 # ── Shared response examples ───────────────────────────────────────────────
@@ -502,20 +564,21 @@ def update_rule(
 # ── GET /v1/config/thresholds ─────────────────────────────────────────────
 @router.get(
     "/thresholds",
-    summary="Get confidence thresholds",
+    summary="Get global confidence thresholds",
     description=(
-        "Returns the current confidence thresholds used for routing decisions. "
-        "These thresholds determine whether a submission is auto-processed, "
-        "flagged for review, or requires manual input. \n\n"
+        "Returns the **global default** confidence thresholds used for "
+        "routing decisions. These apply to all processes unless a process "
+        "has its own threshold configured.\n\n"
+        "To get thresholds for a specific process (which may override these), "
+        "use `GET /v1/processes/{id}/thresholds`.\n\n"
         "- Fields with confidence ≥ `auto_above` → **auto-process**\n"
-        "- Fields with confidence between `manual_below` and `auto_above` "
-        "→ **flag for review**\n"
-        "- Fields with confidence < `manual_below` → **manual input required**"
+        "- Fields between `manual_below` and `auto_above` → **review**\n"
+        "- Fields with confidence < `manual_below` → **manual input**"
     ),
     response_description="Thresholds retrieved successfully",
     responses={
         200: {
-            "description": "Thresholds retrieved successfully",
+            "description": "Global thresholds retrieved",
             "content": {
                 "application/json": {
                     "example": {
@@ -524,9 +587,12 @@ def update_rule(
                         "data": {
                             "auto_above": 85,
                             "manual_below": 60,
+                            "scope": "global",
+                            "process_id": None,
+                            "is_override": False,
                             "description": {
                                 "auto": "confidence ≥ 85% → auto-process",
-                                "review": ("60% ≤ confidence < 85% → flag for review"),
+                                "review": "60% ≤ confidence < 85% → review",
                                 "manual": "confidence < 60% → manual input",
                             },
                         },
@@ -536,20 +602,25 @@ def update_rule(
         },
     },
 )
-def get_thresholds():
-    auto_above = _current_thresholds["autoAbove"]
-    manual_below = _current_thresholds["manualBelow"]
+def get_thresholds(db: Session = db_dependency):
+    row = _ensure_global_threshold(db)
+    auto_above = row.auto_above
+    manual_below = row.manual_below
+
+    # Keep in-memory fallback in sync
+    _GLOBAL_THRESHOLD_FALLBACK["autoAbove"] = auto_above
+    _GLOBAL_THRESHOLD_FALLBACK["manualBelow"] = manual_below
 
     return success_response(
         data={
             "auto_above": auto_above,
             "manual_below": manual_below,
+            "scope": "global",
+            "process_id": None,
+            "is_override": False,
             "description": {
                 "auto": f"confidence ≥ {auto_above}% → auto-process",
-                "review": (
-                    f"{manual_below}% ≤ confidence < {auto_above}%"
-                    f" → flag for review"
-                ),
+                "review": (f"{manual_below}% ≤ confidence < {auto_above}% → review"),
                 "manual": f"confidence < {manual_below}% → manual input",
             },
         },
@@ -560,17 +631,19 @@ def get_thresholds():
 # ── PUT /v1/config/thresholds ─────────────────────────────────────────────
 @router.put(
     "/thresholds",
-    summary="Update confidence thresholds",
+    summary="Update global confidence thresholds",
     description=(
-        "Updates the confidence thresholds used for routing decisions. "
-        "Changes take effect immediately on all subsequent decision requests.\n\n"
-        "`auto_above` must be greater than `manual_below` — "
-        "if they overlap the API returns 422."
+        "Updates the **global default** confidence thresholds. "
+        "Changes take effect immediately for all processes that do not "
+        "have their own threshold override.\n\n"
+        "To set thresholds for a specific process, use "
+        "`PUT /v1/processes/{id}/thresholds`.\n\n"
+        "`auto_above` must be greater than `manual_below`."
     ),
     response_description="Thresholds updated successfully",
     responses={
         200: {
-            "description": "Thresholds updated successfully",
+            "description": "Global thresholds updated",
             "content": {
                 "application/json": {
                     "example": {
@@ -579,14 +652,10 @@ def get_thresholds():
                         "data": {
                             "auto_above": 90,
                             "manual_below": 65,
+                            "scope": "global",
                             "previous": {
                                 "auto_above": 85,
                                 "manual_below": 60,
-                            },
-                            "description": {
-                                "auto": "confidence ≥ 90% → auto-process",
-                                "review": ("65% ≤ confidence < 90% → flag for review"),
-                                "manual": "confidence < 65% → manual input",
                             },
                         },
                     }
@@ -597,36 +666,20 @@ def get_thresholds():
             "description": "Invalid threshold values",
             "content": {
                 "application/json": {
-                    "examples": {
-                        "overlap": {
-                            "summary": "auto_above must be greater than manual_below",
-                            "value": {
-                                "success": False,
-                                "message": (
-                                    "auto_above (60) must be greater than "
-                                    "manual_below (60)"
-                                ),
-                                "data": None,
-                            },
-                        },
-                        "invalid_range": {
-                            "summary": "Values out of range",
-                            "value": {
-                                "success": False,
-                                "message": ("auto_above must be between 51 and 99"),
-                                "data": None,
-                            },
-                        },
+                    "example": {
+                        "success": False,
+                        "message": "auto_above (60) must be greater than manual_below (60)",
+                        "data": None,
                     }
                 }
             },
         },
     },
 )
-def update_thresholds(payload: ThresholdUpdate):
-    global _current_thresholds
-
-    # Validate that auto_above > manual_below
+def update_thresholds(
+    payload: ThresholdUpdate,
+    db: Session = db_dependency,
+):
     if payload.auto_above <= payload.manual_below:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -636,16 +689,23 @@ def update_thresholds(payload: ThresholdUpdate):
             ),
         )
 
+    row = _ensure_global_threshold(db)
     previous = {
-        "auto_above": _current_thresholds["autoAbove"],
-        "manual_below": _current_thresholds["manualBelow"],
+        "auto_above": row.auto_above,
+        "manual_below": row.manual_below,
     }
 
-    _current_thresholds["autoAbove"] = payload.auto_above
-    _current_thresholds["manualBelow"] = payload.manual_below
+    row.auto_above = payload.auto_above
+    row.manual_below = payload.manual_below
+    db.commit()
+    db.refresh(row)
+
+    # Keep in-memory fallback in sync
+    _GLOBAL_THRESHOLD_FALLBACK["autoAbove"] = payload.auto_above
+    _GLOBAL_THRESHOLD_FALLBACK["manualBelow"] = payload.manual_below
 
     logger.info(
-        f"Thresholds updated: "
+        f"Global thresholds updated: "
         f"auto_above={payload.auto_above} "
         f"manual_below={payload.manual_below}"
     )
@@ -654,12 +714,15 @@ def update_thresholds(payload: ThresholdUpdate):
         data={
             "auto_above": payload.auto_above,
             "manual_below": payload.manual_below,
+            "scope": "global",
+            "process_id": None,
+            "is_override": False,
             "previous": previous,
             "description": {
                 "auto": f"confidence ≥ {payload.auto_above}% → auto-process",
                 "review": (
                     f"{payload.manual_below}% ≤ confidence "
-                    f"< {payload.auto_above}% → flag for review"
+                    f"< {payload.auto_above}% → review"
                 ),
                 "manual": f"confidence < {payload.manual_below}% → manual input",
             },

@@ -269,10 +269,11 @@ def _render_thresholds():
     manual_below = t_data.get("manual_below", 60)
 
     st.info(
-        f"**Current thresholds:** "
+        f"**Global default thresholds:** "
         f"auto ≥ **{auto_above}%** · "
         f"manual < **{manual_below}%** · "
-        f"review is everything in between"
+        f"review is everything in between. "
+        f"Individual processes can override these in their settings."
     )
 
     with st.form("update_thresholds"):

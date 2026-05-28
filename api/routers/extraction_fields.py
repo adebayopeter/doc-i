@@ -40,6 +40,7 @@ from config.dependencies import get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Process, ProcessDocument, ProcessDocumentField
 from schemas.base import error_response, success_response
+from schemas.config import ProcessThresholdUpdate
 from schemas.extraction_field import (
     DocumentFieldCreate,
     DocumentFieldUpdate,
@@ -808,4 +809,296 @@ def create_process_rule(
             "created_at": (rule.created_at.isoformat() if rule.created_at else None),
         },
         message="Validation rule created successfully",
+    )
+
+
+# ── GET /v1/processes/{pid}/thresholds ────────────────────────────────────
+@router.get(
+    "/{process_id}/thresholds",
+    summary="Get confidence thresholds for a process",
+    description=(
+        "Returns the confidence thresholds that apply to this process.\n\n"
+        "If the process has its own threshold configuration, those values "
+        "are returned with `is_override: true`.\n\n"
+        "If no process-specific thresholds are configured, the global "
+        "default thresholds are returned with `is_override: false`.\n\n"
+        "Use `PUT /v1/processes/{id}/thresholds` to set an override."
+    ),
+    responses={
+        200: {
+            "description": "Thresholds retrieved",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "override": {
+                            "summary": "Process has its own thresholds",
+                            "value": {
+                                "success": True,
+                                "message": "Thresholds retrieved successfully",
+                                "data": {
+                                    "auto_above": 90,
+                                    "manual_below": 70,
+                                    "scope": "process",
+                                    "process_id": "proc_1a2b3c4d5e6f",
+                                    "is_override": True,
+                                },
+                            },
+                        },
+                        "global": {
+                            "summary": "Using global default",
+                            "value": {
+                                "success": True,
+                                "message": "Thresholds retrieved successfully",
+                                "data": {
+                                    "auto_above": 85,
+                                    "manual_below": 60,
+                                    "scope": "global",
+                                    "process_id": None,
+                                    "is_override": False,
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_process,
+    },
+)
+def get_process_thresholds(
+    process_id: str,
+    db: Session = db_dependency,
+):
+    from db.models import ProcessThreshold
+    from routers.config import _ensure_global_threshold
+
+    _get_process_or_404(process_id, db)
+
+    # Check for process-specific override
+    process_row = (
+        db.query(ProcessThreshold)
+        .filter(ProcessThreshold.process_id == process_id)
+        .first()
+    )
+
+    if process_row:
+        return success_response(
+            data={
+                "auto_above": process_row.auto_above,
+                "manual_below": process_row.manual_below,
+                "scope": "process",
+                "process_id": process_id,
+                "is_override": True,
+                "description": {
+                    "auto": (f"confidence ≥ {process_row.auto_above}% → auto-process"),
+                    "review": (
+                        f"{process_row.manual_below}% ≤ confidence "
+                        f"< {process_row.auto_above}% → review"
+                    ),
+                    "manual": (
+                        f"confidence < {process_row.manual_below}% → manual input"
+                    ),
+                },
+            },
+            message="Thresholds retrieved successfully",
+        )
+
+    # Fall back to global
+    global_row = _ensure_global_threshold(db)
+    return success_response(
+        data={
+            "auto_above": global_row.auto_above,
+            "manual_below": global_row.manual_below,
+            "scope": "global",
+            "process_id": None,
+            "is_override": False,
+            "description": {
+                "auto": (f"confidence ≥ {global_row.auto_above}% → auto-process"),
+                "review": (
+                    f"{global_row.manual_below}% ≤ confidence "
+                    f"< {global_row.auto_above}% → review"
+                ),
+                "manual": (f"confidence < {global_row.manual_below}% → manual input"),
+            },
+        },
+        message="Thresholds retrieved successfully (using global default)",
+    )
+
+
+# ── PUT /v1/processes/{pid}/thresholds ────────────────────────────────────
+@router.put(
+    "/{process_id}/thresholds",
+    summary="Set confidence thresholds for a process",
+    description=(
+        "Creates or updates confidence thresholds specific to this process, "
+        "overriding the global default.\n\n"
+        "Use this when a process requires stricter or more lenient thresholds "
+        "than the global default — for example, RSA Mortgage might require "
+        "≥ 90% confidence for auto-processing while a simpler benefits "
+        "workflow might use ≥ 80%.\n\n"
+        "To revert to the global default, use "
+        "`DELETE /v1/processes/{id}/thresholds`."
+    ),
+    responses={
+        200: {
+            "description": "Process thresholds set",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process thresholds updated successfully",
+                        "data": {
+                            "auto_above": 90,
+                            "manual_below": 70,
+                            "scope": "process",
+                            "process_id": "proc_1a2b3c4d5e6f",
+                            "is_override": True,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_process,
+        422: {
+            "description": "Invalid threshold values",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": "auto_above must be greater than manual_below",
+                        "data": None,
+                    }
+                }
+            },
+        },
+    },
+)
+def set_process_thresholds(
+    process_id: str,
+    payload: "ProcessThresholdUpdate",
+    db: Session = db_dependency,
+):
+    from db.models import ProcessThreshold
+    from schemas.config import ProcessThresholdUpdate
+
+    _get_process_or_404(process_id, db)
+
+    if payload.auto_above <= payload.manual_below:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response(
+                f"auto_above ({payload.auto_above}) must be greater than "
+                f"manual_below ({payload.manual_below})"
+            ),
+        )
+
+    # Upsert — create if not exists, update if exists
+    row = (
+        db.query(ProcessThreshold)
+        .filter(ProcessThreshold.process_id == process_id)
+        .first()
+    )
+
+    if row:
+        previous = {"auto_above": row.auto_above, "manual_below": row.manual_below}
+        row.auto_above = payload.auto_above
+        row.manual_below = payload.manual_below
+    else:
+        previous = None
+        row = ProcessThreshold(
+            process_id=process_id,
+            auto_above=payload.auto_above,
+            manual_below=payload.manual_below,
+        )
+        db.add(row)
+
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        f"Process thresholds set: process={process_id} "
+        f"auto≥{payload.auto_above}% manual<{payload.manual_below}%"
+    )
+
+    return success_response(
+        data={
+            "auto_above": row.auto_above,
+            "manual_below": row.manual_below,
+            "scope": "process",
+            "process_id": process_id,
+            "is_override": True,
+            "previous": previous,
+            "description": {
+                "auto": f"confidence ≥ {row.auto_above}% → auto-process",
+                "review": (
+                    f"{row.manual_below}% ≤ confidence " f"< {row.auto_above}% → review"
+                ),
+                "manual": f"confidence < {row.manual_below}% → manual input",
+            },
+        },
+        message="Process thresholds updated successfully",
+    )
+
+
+# ── DELETE /v1/processes/{pid}/thresholds ─────────────────────────────────
+@router.delete(
+    "/{process_id}/thresholds",
+    summary="Remove process threshold override",
+    description=(
+        "Removes the process-specific threshold configuration, reverting "
+        "this process to use the global default thresholds.\n\n"
+        "If no process-specific threshold exists, returns 200 with no action."
+    ),
+    responses={
+        200: {
+            "description": "Process threshold override removed",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Process threshold override removed. "
+                        "Now using global defaults.",
+                        "data": {
+                            "process_id": "proc_1a2b3c4d5e6f",
+                            "reverted_to_global": True,
+                            "global_auto_above": 85,
+                            "global_manual_below": 60,
+                        },
+                    }
+                }
+            },
+        },
+        404: _404_process,
+    },
+)
+def delete_process_thresholds(
+    process_id: str,
+    db: Session = db_dependency,
+):
+    from db.models import ProcessThreshold
+    from routers.config import _ensure_global_threshold
+
+    _get_process_or_404(process_id, db)
+
+    row = (
+        db.query(ProcessThreshold)
+        .filter(ProcessThreshold.process_id == process_id)
+        .first()
+    )
+
+    if row:
+        db.delete(row)
+        db.commit()
+        logger.info(f"Process threshold override removed: {process_id}")
+
+    global_row = _ensure_global_threshold(db)
+
+    return success_response(
+        data={
+            "process_id": process_id,
+            "reverted_to_global": True,
+            "global_auto_above": global_row.auto_above,
+            "global_manual_below": global_row.manual_below,
+        },
+        message="Process threshold override removed. Now using global defaults.",
     )
