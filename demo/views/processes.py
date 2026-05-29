@@ -139,7 +139,7 @@ def render():
         else:
             for proc in processes:
                 with st.container(border=True):
-                    col1, col2, col3, col4 = st.columns([4, 2, 2, 2])
+                    col1, col2, col3, col4, col5 = st.columns([4, 2, 2, 2, 2])
                     with col1:
                         st.markdown(f"**{proc['name']}**")
                         if proc.get("description"):
@@ -149,6 +149,18 @@ def render():
                             f"{proc['document_count']} documents"
                         )
                     with col2:
+                        if st.button(
+                            "🔍 View",
+                            key=f"view_{proc['process_id']}",
+                            use_container_width=True,
+                        ):
+                            st.session_state[
+                                f"viewing_{proc['process_id']}"
+                            ] = not st.session_state.get(
+                                f"viewing_{proc['process_id']}", False
+                            )
+                            st.rerun()
+                    with col3:
                         if st.button(
                                 "✏️ Edit",
                                 key=f"edit_{proc['process_id']}",
@@ -160,7 +172,7 @@ def render():
                                 )
                             )
                             st.rerun()
-                    with col3:
+                    with col4:
                         if st.button(
                                 "Open",
                                 key=f"open_{proc['process_id']}",
@@ -171,7 +183,7 @@ def render():
                             ]
                             st.session_state.active_page = "Submissions"
                             st.rerun()
-                    with col4:
+                    with col5:
                         if st.button(
                                 "🗑️ Deactivate",
                                 key=f"del_{proc['process_id']}",
@@ -217,6 +229,10 @@ def render():
                                 f"confirm_delete_{proc['process_id']}"
                             ] = False
                             st.rerun()
+
+                # ── Read-only detail view ──────────────────────────────
+                if st.session_state.get(f"viewing_{proc['process_id']}"):
+                    _render_process_detail(proc["process_id"])
 
                 # ── Inline edit form ───────────────────────────────────────
                 if st.session_state.get(f"editing_{proc['process_id']}"):
@@ -821,3 +837,97 @@ def _render_thresholds(process_id: str):
             st.rerun()
         else:
             st.error(f"❌ {result.get('message', 'Failed')}")
+
+
+def _render_process_detail(process_id: str):
+    """Read-only process detail — checklist, fields, rules, thresholds."""
+    detail_result = api_get(f"/v1/processes/{process_id}")
+    if not detail_result.get("success"):
+        st.error("Could not load process details.")
+        return
+
+    detail = detail_result.get("data", {})
+
+    with st.container(border=True):
+        st.markdown(f"### 📋 {detail.get('name')}")
+        if detail.get("description"):
+            st.caption(detail["description"])
+        st.caption(f"`{process_id}`")
+
+        st.divider()
+
+        # ── Document checklist ─────────────────────────────────────────
+        st.markdown("**Document Checklist**")
+        documents = detail.get("documents", [])
+        for doc in documents:
+            req_icon = "🔴" if doc.get("is_required") else "⚪"
+            st.markdown(
+                f"{req_icon} **{doc['name']}** — "
+                f"*{doc.get('category', '—')}*"
+            )
+
+        st.divider()
+
+        # ── Extraction fields summary ──────────────────────────────────
+        st.markdown("**Extraction Fields**")
+        summary_result = api_get(f"/v1/processes/{process_id}/fields/summary")
+        if summary_result.get("success"):
+            summary = summary_result.get("data", {})
+            extraction_enabled = summary.get("extraction_enabled", False)
+
+            if extraction_enabled:
+                st.success(
+                    f"✅ Extraction enabled — "
+                    f"{summary.get('documents_with_fields', 0)}/"
+                    f"{summary.get('total_documents', 0)} documents configured"
+                )
+            else:
+                st.error("❌ Extraction disabled — no fields configured")
+
+            for doc_data in summary.get("documents", []):
+                doc_name = doc_data["document_name"]
+                fields = doc_data.get("items", [])
+                active_fields = [f for f in fields if f["is_active"]]
+
+                if active_fields:
+                    field_names = ", ".join(f["name"] for f in active_fields)
+                    st.caption(f"📄 **{doc_name}**: {field_names}")
+                else:
+                    st.caption(f"📄 **{doc_name}**: *no fields configured*")
+
+        st.divider()
+
+        # ── Validation rules summary ───────────────────────────────────
+        st.markdown("**Validation Rules**")
+        rules_result = api_get(f"/v1/processes/{process_id}/rules")
+        if rules_result.get("success"):
+            rules_data = rules_result.get("data", {})
+            global_count = rules_data.get("global_count", 0)
+            process_count = rules_data.get("process_count", 0)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total", rules_data.get("total", 0))
+            col2.metric("🌐 Global", global_count)
+            col3.metric("🏠 Process-specific", process_count)
+
+        st.divider()
+
+        # ── Threshold summary ──────────────────────────────────────────
+        st.markdown("**Confidence Thresholds**")
+        thr_result = api_get(f"/v1/processes/{process_id}/thresholds")
+        if thr_result.get("success"):
+            thr = thr_result.get("data", {})
+            is_override = thr.get("is_override", False)
+            auto_above = thr.get("auto_above", 85)
+            manual_below = thr.get("manual_below", 60)
+            scope_label = "🔧 Custom override" if is_override else "🌐 Global default"
+            st.caption(
+                f"{scope_label} — "
+                f"auto ≥ **{auto_above}%** · "
+                f"manual < **{manual_below}%** · "
+                f"review **{manual_below}%–{auto_above}%**"
+            )
+
+        st.divider()
+        st.caption(
+            "Click **✏️ Edit** to modify this process configuration."
+        )
