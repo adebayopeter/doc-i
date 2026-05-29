@@ -136,7 +136,7 @@ def _render_upload(selected_sid: str):
                             for f in uploaded_files
                         ]
                         response = requests.post(
-                            f"/v1/documents/submissions/{selected_sid}/upload-bulk",
+                            f"{API_BASE}/v1/documents/submissions/{selected_sid}/upload-bulk",
                             headers={
                                 k: v
                                 for k, v in HEADERS.items()
@@ -235,54 +235,136 @@ def _render_document_list(selected_sid: str, status: str):
 
 
 def _render_document_detail(document_id: str, status: str):
+    """Renders a rich document output card with confidence bars per field."""
     doc_detail = api_get(f"/v1/documents/{document_id}")
     detail = doc_detail.get("data", {})
+    doc_status = detail.get("status", "")
 
-    with st.expander(
-        f"📋 {detail.get('filename')} — Extracted Fields",
-        expanded=True,
-    ):
-        fields = detail.get("extracted_fields") or {}
-        flags = detail.get("flags") or []
-        summary = detail.get("summary")
+    with st.container(border=True):
 
-        if summary:
-            st.info(f"💬 {summary}")
+        # ── Header ─────────────────────────────────────────────────────
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.markdown(f"### 📋 {detail.get('filename', document_id)}")
+        with col2:
+            if st.button("✕ Close", key=f"close_{document_id}",
+                         use_container_width=True):
+                st.session_state[f"show_doc_{document_id}"] = False
+                st.rerun()
 
-        for flag in flags:
-            ftype = flag.get("type", "ok")
-            msg = flag.get("message", "")
-            if ftype == "err":
-                st.error(msg)
-            elif ftype == "warn":
-                st.warning(msg)
-            else:
-                st.success(msg)
+        st.divider()
 
-        if fields:
-            st.subheader("Extracted Fields")
-            rows = [
-                {
-                    "Field": fn,
-                    "Value": d.get("value") or "—",
-                    "Confidence": f"{d.get('confidence', 0):.0f}%",
+        # ── Classification result ───────────────────────────────────────
+        if doc_status == "classified":
+            doc_type = detail.get("document_type") or "Unknown"
+            conf = detail.get("overall_confidence") or 0
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**Classification:** {doc_type}")
+                st.caption(f"`{document_id}`")
+            with col2:
+                # Colour the confidence score
+                if conf >= 85:
+                    colour = "🟢"
+                elif conf >= 60:
+                    colour = "🟡"
+                else:
+                    colour = "🔴"
+                st.markdown(
+                    f"<h2 style='text-align:center'>{colour}<br>{conf:.0f}%</h2>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "<div style='text-align:center'>Overall confidence</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── Summary ────────────────────────────────────────────────
+            summary = detail.get("summary")
+            if summary:
+                st.info(f"💬 {summary}")
+
+            st.divider()
+
+            # ── Flags ──────────────────────────────────────────────────
+            flags = detail.get("flags") or []
+            if flags:
+                for flag in flags:
+                    ftype = flag.get("type", "ok")
+                    msg = flag.get("message", "")
+                    if ftype == "err":
+                        st.error(f"❌ {msg}")
+                    elif ftype == "warn":
+                        st.warning(f"⚠️ {msg}")
+                    else:
+                        st.success(f"✅ {msg}")
+                st.divider()
+
+            # ── Extracted fields with confidence bars ──────────────────
+            fields = detail.get("extracted_fields") or {}
+            if fields:
+                st.markdown("**Extracted Fields**")
+                for field_name, field_data in fields.items():
+                    if not isinstance(field_data, dict):
+                        continue
+
+                    value = field_data.get("value")
+                    field_conf = field_data.get("confidence", 0)
+
+                    # Skip fields that weren't found
+                    if value is None:
+                        continue
+
+                    col1, col2, col3 = st.columns([3, 4, 2])
+                    with col1:
+                        st.caption(field_name)
+                    with col2:
+                        st.markdown(f"**{value}**")
+                    with col3:
+                        bar_colour = (
+                            "🟢" if field_conf >= 85
+                            else "🟡" if field_conf >= 60
+                            else "🔴"
+                        )
+                        st.progress(
+                            field_conf / 100,
+                            text=f"{bar_colour} {field_conf:.0f}%",
+                        )
+
+                # Show null fields separately in a collapsed section
+                null_fields = {
+                    fn: fd for fn, fd in fields.items()
+                    if isinstance(fd, dict) and fd.get("value") is None
                 }
-                for fn, d in fields.items()
-                if isinstance(d, dict)
-            ]
-            if rows:
-                st.table(rows)
-        elif detail.get("status") == "processing":
-            st.spinner("Classification still running...")
-        elif detail.get("status") == "uploaded":
-            st.info("Document uploaded — classification will start shortly.")
+                if null_fields:
+                    with st.expander(
+                        f"⬜ {len(null_fields)} field(s) not found in this document"
+                    ):
+                        for fn in null_fields:
+                            st.caption(f"— {fn}")
 
-        if st.button("Close", key=f"close_{document_id}",):
-            st.session_state[f"show_doc_{document_id}"] = False
-            st.rerun()
+        elif doc_status == "processing":
+            st.info("⏳ Classification is running — refresh in a few seconds.")
 
+        elif doc_status == "uploaded":
+            st.info("📤 Document uploaded — classification will start shortly.")
+
+        elif doc_status == "failed":
+            flags = detail.get("flags") or []
+            st.error("❌ Classification failed")
+            for flag in flags:
+                if flag.get("type") == "err":
+                    st.error(flag.get("message", ""))
+        else:
+            st.info(f"Status: {doc_status}")
+
+        # ── Actions ────────────────────────────────────────────────────
         if status not in {"complete", "rejected"}:
-            if st.button("🗑️ Remove", key=f"del_doc_{document_id}"):
+            if st.button(
+                "🗑️ Remove document",
+                key=f"del_doc_{document_id}",
+            ):
                 api_delete(f"/v1/documents/{document_id}")
                 st.session_state[f"show_doc_{document_id}"] = False
                 st.rerun()
