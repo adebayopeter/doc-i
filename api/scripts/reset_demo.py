@@ -54,6 +54,7 @@ def reset_demo(db, hard: bool = False):
 
     if hard:
         from db.models import ValidationRule
+
         deleted_rules = db.query(ValidationRule).delete(synchronize_session=False)
         print(f"   Deleted {deleted_rules} validation rules (hard reset)")
 
@@ -62,8 +63,9 @@ def reset_demo(db, hard: bool = False):
 
     if hard:
         print("\n🌱 Re-seeding validation rules...")
-        from scripts.seed_rules import seed_rules
-        seed_rules(db)
+        from scripts.seed_rules import seed
+
+        seed(reset=True, session=db)
 
 
 if __name__ == "__main__":
@@ -75,8 +77,7 @@ if __name__ == "__main__":
         print("⚠️  HARD RESET — this will also wipe and re-seed validation rules.")
     else:
         print(
-            "ℹ️  Soft reset — keeps validation rules. "
-            "Use --hard to also reset rules."
+            "ℹ️  Soft reset — keeps validation rules. " "Use --hard to also reset rules."
         )
 
     confirm = input("Type 'yes' to confirm: ").strip().lower()
