@@ -3,6 +3,7 @@ databases:
     databaseName: doc_i
     user: doc_i_user
     plan: free
+    ipAllowList: []
 
 services:
   # ── Redis ────────────────────────────────────────────────────────────
@@ -57,10 +58,7 @@ services:
       - key: MINIO_USER
         value: minioadmin
       - key: MINIO_PASSWORD
-        fromService:
-          name: doc-i-minio
-          type: web
-          property: MINIO_ROOT_PASSWORD
+        sync: false
       - key: MINIO_BUCKET
         value: doc-i-documents
       - key: ANTHROPIC_API_KEY
@@ -82,12 +80,9 @@ services:
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: REQUIREMENTS_FILE
-        value: prod.txt
-      - key: PYTHON_VERSION
-        value: "3.12"
+        value: requirements/prod.txt
       - key: SERVICE_TYPE
         value: api
-    buildCommand: echo "Build complete"
     preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
 
   # ── Celery Worker ────────────────────────────────────────────────────
@@ -119,10 +114,7 @@ services:
       - key: MINIO_USER
         value: minioadmin
       - key: MINIO_PASSWORD
-        fromService:
-          name: doc-i-minio
-          type: web
-          property: MINIO_ROOT_PASSWORD
+        sync: false
       - key: MINIO_BUCKET
         value: doc-i-documents
       - key: ANTHROPIC_API_KEY
@@ -142,9 +134,7 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: REQUIREMENTS_FILE
-        value: prod.txt
-      - key: PYTHON_VERSION
-        value: "3.12"
+        value: requirements/prod.txt
       - key: SERVICE_TYPE
         value: worker
 
@@ -157,12 +147,6 @@ services:
     plan: free
     envVars:
       - key: API_BASE_URL
-        fromService:
-          name: doc-i-api
-          type: web
-          property: url
+        sync: false
       - key: SECRET_KEY
-        fromService:
-          name: doc-i-api
-          type: web
-          property: SECRET_KEY
+        sync: false
