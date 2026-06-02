@@ -390,7 +390,7 @@ def _render_categories():
     if total == 0:
         st.info(
             "No categories yet. Add your first one above.\n\n"
-            "**Suggested categories for Nigerian document processing:**\n"
+            "**Suggested categories for document processing:**\n"
             "Identity · Financial · Income · Supporting · Legal · Property"
         )
         return
