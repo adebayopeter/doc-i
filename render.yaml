@@ -3,7 +3,9 @@ databases:
     databaseName: doc_i
     user: doc_i_user
     plan: free
-    ipAllowList: []
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all
 
 services:
   # ── Redis ────────────────────────────────────────────────────────────
