@@ -1,0 +1,168 @@
+databases:
+  - name: doc-i-postgres
+    databaseName: doc_i
+    user: doc_i_user
+    plan: free
+
+services:
+  # ── Redis ────────────────────────────────────────────────────────────
+  - type: redis
+    name: doc-i-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+
+  # ── MinIO ────────────────────────────────────────────────────────────
+  - type: web
+    name: doc-i-minio
+    runtime: docker
+    dockerfilePath: ./docker/minio.Dockerfile
+    plan: starter
+    disk:
+      name: minio-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: MINIO_ROOT_USER
+        value: minioadmin
+      - key: MINIO_ROOT_PASSWORD
+        generateValue: true
+
+  # ── API ──────────────────────────────────────────────────────────────
+  - type: web
+    name: doc-i-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: doc-i-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: doc-i-redis
+          type: redis
+          property: connectionString
+      - key: MINIO_HOST
+        fromService:
+          name: doc-i-minio
+          type: web
+          property: host
+      - key: MINIO_PORT
+        value: "443"
+      - key: MINIO_SECURE
+        value: "true"
+      - key: MINIO_USER
+        value: minioadmin
+      - key: MINIO_PASSWORD
+        fromService:
+          name: doc-i-minio
+          type: web
+          property: MINIO_ROOT_PASSWORD
+      - key: MINIO_BUCKET
+        value: doc-i-documents
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-20250514
+      - key: CLAUDE_MAX_TOKENS
+        value: "1500"
+      - key: AZURE_DOCINT_ENDPOINT
+        sync: false
+      - key: AZURE_DOCINT_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: REQUIREMENTS_FILE
+        value: prod.txt
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: SERVICE_TYPE
+        value: api
+    buildCommand: echo "Build complete"
+    preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
+
+  # ── Celery Worker ────────────────────────────────────────────────────
+  - type: worker
+    name: doc-i-worker
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: doc-i-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: doc-i-redis
+          type: redis
+          property: connectionString
+      - key: MINIO_HOST
+        fromService:
+          name: doc-i-minio
+          type: web
+          property: host
+      - key: MINIO_PORT
+        value: "443"
+      - key: MINIO_SECURE
+        value: "true"
+      - key: MINIO_USER
+        value: minioadmin
+      - key: MINIO_PASSWORD
+        fromService:
+          name: doc-i-minio
+          type: web
+          property: MINIO_ROOT_PASSWORD
+      - key: MINIO_BUCKET
+        value: doc-i-documents
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-20250514
+      - key: CLAUDE_MAX_TOKENS
+        value: "1500"
+      - key: AZURE_DOCINT_ENDPOINT
+        sync: false
+      - key: AZURE_DOCINT_KEY
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: REQUIREMENTS_FILE
+        value: prod.txt
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: SERVICE_TYPE
+        value: worker
+
+  # ── Demo ─────────────────────────────────────────────────────────────
+  - type: web
+    name: doc-i-demo
+    runtime: docker
+    dockerfilePath: ./demo/Dockerfile
+    dockerContext: ./demo
+    plan: free
+    envVars:
+      - key: API_BASE_URL
+        fromService:
+          name: doc-i-api
+          type: web
+          property: url
+      - key: SECRET_KEY
+        fromService:
+          name: doc-i-api
+          type: web
+          property: SECRET_KEY

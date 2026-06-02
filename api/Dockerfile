@@ -2,8 +2,6 @@ ARG PYTHON_VERSION=3.12
 
 FROM python:${PYTHON_VERSION}-slim
 
-ARG REQUIREMENTS_FILE
-
 WORKDIR /app
 
 # Prevents Python from writing .pyc files
@@ -23,10 +21,17 @@ RUN apt-get update \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
+
 # Python Dependencies
 # Copy only requirements first — Docker caches this layer
 # so pip install only re-runs when requirements files change
 COPY requirements/ requirements/
+
+# REQUIREMENTS_FILE can be passed as build arg or env var
+# Defaults to prod.txt for production builds
+ARG REQUIREMENTS_FILE=requirements/prod.txt
+ENV REQUIREMENTS_FILE=${REQUIREMENTS_FILE}
+
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
 
@@ -36,7 +41,4 @@ ARG API_INTERNAL_PORT=8012
 ENV API_INTERNAL_PORT=${API_INTERNAL_PORT}
 EXPOSE ${API_INTERNAL_PORT}
 
-CMD ["uvicorn", "main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8012", \
-     "--reload"]
+CMD ["/bin/bash", "entrypoint.sh"]
