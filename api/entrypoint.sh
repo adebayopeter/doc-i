@@ -7,11 +7,17 @@ case "$SERVICE_TYPE" in
     exec celery -A workers.tasks worker --loglevel=info --concurrency=2
     ;;
   api)
+    echo "Running database migrations..."
+    alembic upgrade head
+    echo "Seeding default rules..."
+    python scripts/seed_rules.py
     echo "Starting API server..."
     exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8012}
     ;;
   *)
-    echo "Starting API server (default)..."
+    echo "Running database migrations..."
+    alembic upgrade head
+    echo "Starting API server..."
     exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8012}
     ;;
 esac

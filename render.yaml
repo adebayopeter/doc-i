@@ -25,7 +25,6 @@ services:
     dockerContext: ./api
     plan: free
     healthCheckPath: /health
-    preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
