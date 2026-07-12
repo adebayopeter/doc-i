@@ -17,23 +17,6 @@ services:
       - source: 0.0.0.0/0
         description: Allow all
 
-
-  # ── MinIO ────────────────────────────────────────────────────────────
-  - type: web
-    name: doc-i-minio
-    runtime: docker
-    dockerfilePath: ./docker/minio.Dockerfile
-    plan: starter
-    disk:
-      name: minio-data
-      mountPath: /data
-      sizeGB: 10
-    envVars:
-      - key: MINIO_ROOT_USER
-        value: minioadmin
-      - key: MINIO_ROOT_PASSWORD
-        generateValue: true
-
   # ── API ──────────────────────────────────────────────────────────────
   - type: web
     name: doc-i-api
@@ -42,6 +25,7 @@ services:
     dockerContext: ./api
     plan: starter
     healthCheckPath: /health
+    preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -52,21 +36,12 @@ services:
           name: doc-i-redis
           type: redis
           property: connectionString
-      - key: MINIO_HOST
-        fromService:
-          name: doc-i-minio
-          type: web
-          property: host
-      - key: MINIO_PORT
-        value: "443"
-      - key: MINIO_SECURE
-        value: "true"
-      - key: MINIO_USER
-        value: minioadmin
-      - key: MINIO_PASSWORD
+      - key: CLOUDINARY_CLOUD_NAME
         sync: false
-      - key: MINIO_BUCKET
-        value: doc-i-documents
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: CLAUDE_MODEL
@@ -89,7 +64,6 @@ services:
         value: requirements/prod.txt
       - key: SERVICE_TYPE
         value: api
-    preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
 
   # ── Celery Worker ────────────────────────────────────────────────────
   - type: worker
@@ -108,21 +82,12 @@ services:
           name: doc-i-redis
           type: redis
           property: connectionString
-      - key: MINIO_HOST
-        fromService:
-          name: doc-i-minio
-          type: web
-          property: host
-      - key: MINIO_PORT
-        value: "443"
-      - key: MINIO_SECURE
-        value: "true"
-      - key: MINIO_USER
-        value: minioadmin
-      - key: MINIO_PASSWORD
+      - key: CLOUDINARY_CLOUD_NAME
         sync: false
-      - key: MINIO_BUCKET
-        value: doc-i-documents
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: CLAUDE_MODEL
