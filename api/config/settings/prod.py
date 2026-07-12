@@ -43,8 +43,11 @@ class ProdSettings(BaseAppSettings):
         if not v:
             raise ValueError(
                 "ALLOWED_ORIGINS must be set in production. "
-                "e.g. https://docint.yourfirm.ng,https://mortgage.yourfirm.ng"
+                "e.g. Use * for demo or https://yourdomain.com for production."
             )
+        # Allow wildcard for demo deployments
+        if v.strip() == "*":
+            return v
         origins = [o.strip() for o in v.split(",")]
         for origin in origins:
             if not origin.startswith("https://"):

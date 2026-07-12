@@ -23,12 +23,17 @@ class BaseAppSettings(BaseSettings):
     # Redis
     REDIS_URL: str
 
-    # MinIO
-    MINIO_ENDPOINT: str
-    MINIO_USER: str
-    MINIO_PASSWORD: str
+    # MinIO (local only — production uses Cloudinary)
+    MINIO_ENDPOINT: str = ""
+    MINIO_USER: str = ""
+    MINIO_PASSWORD: str = ""
     MINIO_BUCKET: str = "documents"
     MINIO_SECURE: bool = False
+
+    # Cloudinary (production only — local uses MinIO)
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
     # AI APIs
     ANTHROPIC_API_KEY: str
