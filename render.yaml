@@ -23,7 +23,7 @@ services:
     runtime: docker
     dockerfilePath: ./api/Dockerfile
     dockerContext: ./api
-    plan: starter
+    plan: free
     healthCheckPath: /health
     preDeployCommand: "alembic upgrade head && python scripts/seed_rules.py"
     envVars:
@@ -71,7 +71,7 @@ services:
     runtime: docker
     dockerfilePath: ./api/Dockerfile
     dockerContext: ./api
-    plan: starter
+    plan: free
     envVars:
       - key: DATABASE_URL
         fromDatabase:
