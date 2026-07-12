@@ -65,12 +65,13 @@ services:
         value: api
 
   # ── Celery Worker ────────────────────────────────────────────────────
-  - type: worker
+  - type: web
     name: doc-i-worker
     runtime: docker
     dockerfilePath: ./api/Dockerfile
     dockerContext: ./api
     plan: free
+    healthCheckPath: /
     envVars:
       - key: SERVICE_TYPE
         value: worker
@@ -107,8 +108,6 @@ services:
         value: INFO
       - key: REQUIREMENTS_FILE
         value: requirements/prod.txt
-      - key: SERVICE_TYPE
-        value: worker
 
   # ── Demo ─────────────────────────────────────────────────────────────
   - type: web
