@@ -35,46 +35,50 @@ def test_get_db_closes_on_exception():
 
 
 @pytest.mark.asyncio
-async def test_verify_api_key_valid():
-    """Valid API key must return the key."""
-    from config.dependencies import verify_api_key
+async def test_verify_api_key_valid(db_session):
+    """Valid master SECRET_KEY must return an AuthContext with admin access."""
+    from config.dependencies import AuthContext, verify_api_key
     from config.settings import settings
 
-    result = await verify_api_key(api_key=settings.SECRET_KEY)
-    assert result == settings.SECRET_KEY
+    result = await verify_api_key(api_key=settings.SECRET_KEY, db=db_session)
+    assert isinstance(result, AuthContext)
+    assert result.key_id == "master"
+    assert result.name == "Master Admin Key"
+    assert result.is_admin is True
+    assert result.scopes == ["read", "write"]
 
 
 @pytest.mark.asyncio
-async def test_verify_api_key_missing():
+async def test_verify_api_key_missing(db_session):
     """Missing API key must raise 401."""
     from config.dependencies import verify_api_key
 
     with pytest.raises(HTTPException) as exc:
-        await verify_api_key(api_key=None)
+        await verify_api_key(api_key=None, db=db_session)
 
     assert exc.value.status_code == 401
     assert exc.value.detail["message"] == "X-API-Key header is missing"
 
 
 @pytest.mark.asyncio
-async def test_verify_api_key_invalid():
+async def test_verify_api_key_invalid(db_session):
     """Invalid API key must raise 401."""
     from config.dependencies import verify_api_key
 
     with pytest.raises(HTTPException) as exc:
-        await verify_api_key(api_key="invalid-key-that-does-not-match")
+        await verify_api_key(api_key="invalid-key-that-does-not-match", db=db_session)
 
     assert exc.value.status_code == 401
     assert exc.value.detail["message"] == "Invalid API key"
 
 
 @pytest.mark.asyncio
-async def test_verify_api_key_empty_string():
+async def test_verify_api_key_empty_string(db_session):
     """Empty string API key must raise 401."""
     from config.dependencies import verify_api_key
 
     with pytest.raises(HTTPException) as exc:
-        await verify_api_key(api_key="")
+        await verify_api_key(api_key="", db=db_session)
 
     assert exc.value.status_code == 401
     assert exc.value.detail["message"] == "X-API-Key header is missing"

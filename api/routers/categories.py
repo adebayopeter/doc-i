@@ -11,7 +11,7 @@ Document Category router.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import get_db, require_admin
 from config.logging import get_logger
 from db.models import DocumentCategory
 from schemas.base import error_response, success_response
@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 # ── Module-level dependencies (avoids B008) ────────────────────────────────
 db_dependency = Depends(get_db)
-auth_dependency = Depends(verify_api_key)
+auth_dependency = Depends(require_admin)  # Categories require admin access
 
 # ── Shared response dicts ──────────────────────────────────────────────────
 _401 = {

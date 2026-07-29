@@ -9,6 +9,10 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# ── Demo password protection ───────────────────────────────────────────────
+# If set, the demo requires this password to access. If empty, no password gate.
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "")
+
 # ── Colours ────────────────────────────────────────────────────────────────
 DECISION_COLOUR = {
     "auto": "🟢",

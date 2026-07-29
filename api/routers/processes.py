@@ -11,7 +11,7 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import AuthContext, get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Process, ProcessDocument
 from schemas.base import error_response, success_response
@@ -24,6 +24,7 @@ from schemas.process import (
     ProcessSummary,
     ProcessUpdate,
 )
+from services.api_keys import verify_key_for_process
 
 logger = get_logger(__name__)
 
@@ -351,18 +352,25 @@ def create_process(
         },
     },
 )
-def list_processes(db: Session = db_dependency):
+def list_processes(
+    db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
+):
     """
     List all active process definitions.
-    """
-    processes = (
-        db.query(Process)
-        .filter(Process.is_active == True)  # noqa: E712
-        .order_by(Process.created_at.desc())
-        .all()
-    )
 
-    logger.info(f"Listed {len(processes)} processes")
+    Non-admin keys only see processes they have access to.
+    Admin keys see all processes.
+    """
+    query = db.query(Process).filter(Process.is_active == True)  # noqa: E712
+
+    # Filter to only accessible processes for non-admin keys
+    if not auth.is_admin and auth.process_ids:
+        query = query.filter(Process.id.in_(auth.process_ids))
+
+    processes = query.order_by(Process.created_at.desc()).all()
+
+    logger.info(f"Listed {len(processes)} processes for key {auth.key_id}")
 
     return success_response(
         message="Processes retrieved successfully",
@@ -450,10 +458,24 @@ def list_processes(db: Session = db_dependency):
 def get_process(
     process_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     """
     Get a single process with its full document checklist.
+
+    Requires access to the specified process.
     """
+    # Check access before fetching
+    if not verify_key_for_process(auth.process_ids, process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": f"This API key does not have access to process '{process_id}'",
+                "data": None,
+            },
+        )
+
     process = _get_process_or_404(process_id, db)
 
     logger.info(f"Retrieved process: {process_id}")
@@ -498,7 +520,19 @@ def update_process(
     process_id: str,
     payload: ProcessUpdate,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
+    # Check access before fetching
+    if not verify_key_for_process(auth.process_ids, process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": f"This API key does not have access to process '{process_id}'",
+                "data": None,
+            },
+        )
+
     process = _get_process_or_404(process_id, db)
 
     if not process.is_active:
@@ -596,10 +630,24 @@ def update_process(
 def delete_process(
     process_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     """
     Deactivate a process — soft delete, not permanent.
+
+    Requires access to the specified process.
     """
+    # Check access before fetching
+    if not verify_key_for_process(auth.process_ids, process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": f"This API key does not have access to process '{process_id}'",
+                "data": None,
+            },
+        )
+
     process = _get_process_or_404(process_id, db)
 
     process.is_active = False

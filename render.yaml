@@ -121,3 +121,5 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      - key: DEMO_PASSWORD
+        sync: false

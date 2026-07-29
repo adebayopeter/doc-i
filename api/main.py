@@ -16,6 +16,7 @@ from config.logging import get_logger
 from config.settings import settings
 from routers import (
     analysis,
+    api_keys,
     categories,
     config,
     documents,
@@ -221,6 +222,12 @@ app.include_router(
     extraction_fields.router,
     prefix="/v1/processes",
     tags=["Processes"],
+)
+
+app.include_router(
+    api_keys.router,
+    prefix="/v1/admin/keys",
+    tags=["Admin"],
 )
 
 

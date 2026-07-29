@@ -91,7 +91,49 @@ All endpoints return the standard envelope:
 }
 ```
 
-Authentication: pass your `SECRET_KEY` as `X-API-Key` in every request.
+Authentication: pass your API key as `X-API-Key` in every request.
+
+### API Key Management
+
+The platform supports two types of authentication:
+
+1. **Master SECRET_KEY** (from `.env`) — full admin access, can manage API keys
+2. **Per-process API keys** (from database) — scoped to specific processes
+
+#### Creating API keys
+
+Use the master SECRET_KEY or an admin API key to create scoped keys:
+
+```bash
+curl -X POST http://localhost:8012/v1/admin/keys \
+  -H "X-API-Key: your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Benefits Application - Production",
+    "process_ids": ["proc_abc123"],
+    "scopes": ["read", "write"]
+  }'
+```
+
+The full key is returned **only once** — save it immediately.
+
+#### Key types
+
+| Type | `process_ids` | Access |
+|---|---|---|
+| Admin key | `[]` (empty) | All processes + admin endpoints |
+| Scoped key | `["proc_abc"]` | Only listed processes |
+
+#### Admin endpoints
+
+```
+POST   /v1/admin/keys           — create a key (returns full key once)
+GET    /v1/admin/keys           — list all keys (prefix only)
+GET    /v1/admin/keys/{id}      — get key details
+PATCH  /v1/admin/keys/{id}      — update name/scope/active
+POST   /v1/admin/keys/{id}/rotate — generate new secret
+DELETE /v1/admin/keys/{id}      — permanently revoke
+```
 
 ### Endpoints
 
@@ -128,6 +170,14 @@ GET    /v1/config/categories
 GET    /v1/config/categories/{id}
 PATCH  /v1/config/categories/{id}
 DELETE /v1/config/categories/{id}
+
+# Admin — API Key Management (admin keys only)
+POST   /v1/admin/keys
+GET    /v1/admin/keys
+GET    /v1/admin/keys/{id}
+PATCH  /v1/admin/keys/{id}
+POST   /v1/admin/keys/{id}/rotate
+DELETE /v1/admin/keys/{id}
 ```
 
 ---
@@ -294,3 +344,5 @@ or the Config page.
 - [ ] Remove `--reload` from the API command in `docker-compose.yml`
 - [ ] Set up log aggregation (the API logs structured JSON)
 - [ ] Run `make setup` on first deploy
+- [ ] Create per-process API keys for each application (Benefits, Mortgage, KYC)
+- [ ] Rotate the master SECRET_KEY after creating admin API keys

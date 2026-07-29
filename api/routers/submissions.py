@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import AuthContext, get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Process, Submission, SubmissionDocument
 from schemas.base import error_response, success_response
@@ -27,6 +27,7 @@ from schemas.submission import (
     SubmissionOut,
     SubmissionProgress,
 )
+from services.api_keys import verify_key_for_process
 
 logger = get_logger(__name__)
 
@@ -234,11 +235,26 @@ def _build_submission_out_with_process(
 def create_submission(
     payload: SubmissionCreate,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     logger.info(
         f"Opening submission for process: {payload.process_id} "
         f"ref: {payload.reference}"
     )
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, payload.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{payload.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     # Verify the process exists and is active
     process = (
@@ -341,18 +357,36 @@ def create_submission(
 def list_submissions(
     process_id: Optional[str] = None,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     query = db.query(Submission).options(
         joinedload(Submission.process).joinedload(Process.documents),
         joinedload(Submission.documents),
     )
 
+    # Filter by specific process if requested
     if process_id:
+        # Check access to the requested process
+        if not verify_key_for_process(auth.process_ids, process_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "message": (
+                        f"This API key does not have access to "
+                        f"process '{process_id}'"
+                    ),
+                    "data": None,
+                },
+            )
         query = query.filter(Submission.process_id == process_id)
+    elif not auth.is_admin and auth.process_ids:
+        # Non-admin keys only see submissions for their accessible processes
+        query = query.filter(Submission.process_id.in_(auth.process_ids))
 
     submissions = query.order_by(Submission.created_at.desc()).all()
 
-    logger.info(f"Listed {len(submissions)} submissions")
+    logger.info(f"Listed {len(submissions)} submissions for key {auth.key_id}")
 
     return success_response(
         data=SubmissionListData(
@@ -409,8 +443,24 @@ def list_submissions(
 def get_submission(
     submission_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
+
     logger.info(f"Retrieved submission: {submission_id}")
 
     return success_response(
@@ -489,8 +539,23 @@ def get_submission(
 def list_submission_documents(
     submission_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
-    _get_submission_or_404(submission_id, db)
+    submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     documents = (
         db.query(SubmissionDocument)
@@ -606,8 +671,23 @@ def update_submission_status(
     submission_id: str,
     new_status: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     # Validate the requested status value
     if new_status not in VALID_STATUSES:

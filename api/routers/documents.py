@@ -19,10 +19,11 @@ from typing import List
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import AuthContext, get_db, verify_api_key
 from config.logging import get_logger
 from db.models import Submission, SubmissionDocument
 from schemas.base import error_response, success_response
+from services.api_keys import verify_key_for_process
 
 logger = get_logger(__name__)
 
@@ -305,9 +306,24 @@ async def upload_document(
     submission_id: str,
     file: UploadFile = file_upload,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     # Verify submission exists
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     # Block uploads to terminal submissions
     if submission.status in {"complete", "rejected"}:
@@ -544,8 +560,25 @@ async def upload_document(
 def get_document(
     document_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     document = _get_document_or_404(document_id, db)
+
+    # Look up the submission to check process access
+    submission = _get_submission_or_404(document.submission_id, db)
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
+
     logger.info(f"Retrieved document: {document_id} status={document.status}")
 
     return success_response(
@@ -589,9 +622,24 @@ def get_document(
 def delete_document(
     document_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     document = _get_document_or_404(document_id, db)
     submission = _get_submission_or_404(document.submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     # Block deletion from terminal submissions
     if submission.status in {"complete", "rejected"}:
@@ -677,11 +725,26 @@ def upload_bulk_documents(
     submission_id: str,
     files: List[UploadFile] = files_upload,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     from services.storage import upload_file
     from workers.tasks import process_document
 
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
 
     if submission.status == "complete":
         raise HTTPException(

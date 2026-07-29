@@ -18,7 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import get_db, require_admin
 from config.logging import get_logger
 from db.models import ProcessThreshold, ValidationRule
 from schemas.base import error_response, success_response
@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 # ── Module-level dependencies ──────────────────────────────────────────────
 db_dependency = Depends(get_db)
-auth_dependency = Depends(verify_api_key)
+auth_dependency = Depends(require_admin)  # Config requires admin access
 
 # ── Threshold helpers ──────────────────────────────────────────────────────
 _GLOBAL_THRESHOLD_FALLBACK = dict(DEFAULT_THRESHOLDS)

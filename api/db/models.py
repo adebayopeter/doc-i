@@ -424,3 +424,55 @@ class AuditLog(Base):
 
     def __repr__(self):
         return f"<AuditLog id={self.id} event={self.event}>"
+
+
+# 9. ApiKey
+class ApiKey(Base):
+    """
+    Per-process API key for authentication and access control.
+
+    Each API key can be scoped to specific processes:
+      - process_ids = []  → admin key, can access ALL processes
+      - process_ids = ["proc_abc", "proc_xyz"] → can only access those processes
+
+    Keys are stored as SHA256 hashes — the full key is shown only once at creation.
+    The key_prefix (first 12 chars) is stored for identification in listings.
+
+    Scopes control what operations are allowed:
+      - ["read"]         → GET requests only
+      - ["write"]        → all methods (includes read)
+      - ["read", "write"] → same as ["write"]
+    """
+
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=lambda: _gen_id("key"))
+    name = Column(String(200), nullable=False, unique=True)
+
+    # First 13 chars of the key for identification (e.g. "doci_key_a1b2")
+    key_prefix = Column(String(20), nullable=False)
+
+    # SHA256 hash of the full key — NEVER store plaintext
+    key_hash = Column(String(64), nullable=False, unique=True, index=True)
+
+    # Process IDs this key can access. Empty array = admin key (all access)
+    process_ids = Column(JSON, default=list, nullable=False)
+
+    # Scopes: ["read"], ["write"], or ["read", "write"]
+    scopes = Column(JSON, default=lambda: ["read", "write"], nullable=False)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    # Tracks usage — updated on each API call
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    request_count = Column(Integer, default=0, nullable=False)
+
+    # Optional expiry — NULL means never expires
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        scope = (
+            "admin" if not self.process_ids else f"{len(self.process_ids)} processes"
+        )
+        return f"<ApiKey id={self.id} name={self.name} scope={scope}>"

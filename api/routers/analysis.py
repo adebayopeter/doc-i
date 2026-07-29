@@ -22,7 +22,7 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from config.dependencies import get_db, verify_api_key
+from config.dependencies import AuthContext, get_db, verify_api_key
 from config.logging import get_logger
 from db.models import (
     ProcessDocumentField,
@@ -32,6 +32,7 @@ from db.models import (
 )
 from schemas.base import error_response, success_response
 from services.aggregation import build_unified_record
+from services.api_keys import verify_key_for_process
 from services.decisioning import compute_decision
 from services.validation import run_rules
 
@@ -216,8 +217,24 @@ def _get_classified_documents(submission_id: str, db: Session) -> list:
 def get_unified_record(
     submission_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
-    _get_submission_or_404(submission_id, db)
+    submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
+
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
 
@@ -322,10 +339,25 @@ def get_unified_record(
 def get_validation(
     submission_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     from sqlalchemy import or_
 
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
 
@@ -501,12 +533,27 @@ def get_validation(
 def get_decision(
     submission_id: str,
     db: Session = db_dependency,
+    auth: AuthContext = Depends(verify_api_key),
 ):
     from sqlalchemy import or_
 
     from routers.config import get_process_thresholds
 
     submission = _get_submission_or_404(submission_id, db)
+
+    # Check process access
+    if not verify_key_for_process(auth.process_ids, submission.process_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "message": (
+                    f"This API key does not have access to "
+                    f"process '{submission.process_id}'"
+                ),
+                "data": None,
+            },
+        )
     classified = _get_classified_documents(submission_id, db)
     record = build_unified_record(classified)
 

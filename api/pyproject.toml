@@ -19,6 +19,11 @@ omit = [
     "services/ocr.py",         # calls Azure DocInt — external API
     "services/extraction.py",  # calls Claude API — external API
     "workers/tasks.py",        # calls Celery + all services — integration test
+    # Exclude standalone scripts — run directly from CLI, not imported
+    "scripts/seed_admin_key.py",
+    "scripts/reset_demo.py",
+    "scripts/create_minio_bucket.py",
+    "worker_health.py",        # standalone health check for worker
 ]
 
 [tool.coverage.report]
