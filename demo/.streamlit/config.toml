@@ -1,0 +1,14 @@
+[server]
+# Larger WebSocket message size for big pages (default 200MB is fine,
+# but explicit XSRF/CORS settings behind a proxy prevent handshake issues)
+enableXsrfProtection = false
+enableCORS = false
+maxMessageSize = 500
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+# Prevents partial reruns from firing before session is ready
+fastReruns = false
