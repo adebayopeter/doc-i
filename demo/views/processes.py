@@ -20,7 +20,7 @@ def render():
         num_docs = st.number_input(
             "Number of documents",
             min_value=1,
-            max_value=20,
+            max_value=30,
             value=st.session_state.get("num_docs", 3),
             key="num_docs",
         )
@@ -250,7 +250,7 @@ def _render_edit_form(proc: dict):
         edit_num_docs = st.number_input(
             "Number of documents",
             min_value=1,
-            max_value=20,
+            max_value=30,
             value=max(len(current_docs), 1),
             key=f"edit_num_{proc['process_id']}",
         )
